@@ -67,7 +67,7 @@ setup_configs() {
     echo -e "${Y}${L}\n Setting up configs..." $G" JuniorSir \n${N}"
     sleep 2
     echo -e "${Y}${L}\n Creating Web Videos folder... \n${N}"
-    mkdir -p ~/storage/web videos
+    mkdir -p ~/storage/webvideos
     sleep 1.5
     echo -e "${Y}${L}\n Creating youtube-dl config... \n${N}"
     rm -rf ~/.config/yt-dlp
