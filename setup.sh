@@ -89,7 +89,7 @@ setup_executables() {
     rm -rf /data/data/com.termux/files/usr/bin/web
     wget -q https://raw.githubusercontent.com/juniorsir/Download-from-anywhere-/main/run.sh
     mv run.sh /data/data/com.termux/files/usr/bin/web || exit 1
-    chmod +x web
+    chmod +x /data/data/com.termux/files/usr/bin/web
     clear
 }
 
