@@ -66,8 +66,8 @@ install_youtube_dl() {
 setup_configs() {
     echo -e "${Y}${L}\n Setting up configs..." $G" JuniorSir \n${N}"
     sleep 2
-    echo -e "${Y}${L}\n Creating YouTube folder... \n${N}"
-    mkdir -p ~/storage/YouTube
+    echo -e "${Y}${L}\n Creating Web Videos folder... \n${N}"
+    mkdir -p ~/storage/web videos
     sleep 1.5
     echo -e "${Y}${L}\n Creating youtube-dl config... \n${N}"
     rm -rf ~/.config/yt-dlp
@@ -86,10 +86,10 @@ setup_executables() {
     mkdir -p ~/bin
     sleep 1.5
     echo -e "${Y}${L}\n Getting files...\n${N}"
-    rm -rf ~/bin/termux-url-opener
-    wget -q https://raw.githubusercontent.com/juniorsir/Download-from-anywhere/main/ -P ~/bin
-    cd ~/bin || exit 1
-    chmod +x termux-url-opener
+    rm /data/data/com.termux/files/usr/bin/web
+    wget -q https://raw.githubusercontent.com/juniorsir/Download-from-anywhere/main/run.sh -P ~/bin
+    cd ~/data/data/com.termux/files/usr/bin/web || exit 1
+    chmod +x web
     clear
 }
 
