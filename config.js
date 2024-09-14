@@ -11,7 +11,7 @@ app.post('/webhook', async (req, res) => {
   const message = req.body.message;
 
   if (message && message.text === '/run') {
-    exec('bash script.sh', (error, stdout, stderr) => {
+    exec('bash setup.sh', (error, stdout, stderr) => {
       if (error) {
         console.error(`Error executing script: ${error}`);
         return sendMessage(message.chat.id, `Error: ${error.message}`);
