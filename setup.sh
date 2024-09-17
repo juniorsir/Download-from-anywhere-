@@ -1,35 +1,27 @@
-#!/data/data/com.termux/files/usr/bin/bash
 
-# ANSI Escape Codes for Colors
-BL='\e[01;90m'
 R='\e[01;91m'
 G='\e[01;92m'
-Y='\e[01;93m'
-LG='\e[01;37m'
+Y='\e[01;93m'                                                                                                                                                                                                                                                            LG='\e[01;37m'
 N='\e[0m'
 L='\033[7m'
-X='\033[0m'
-
-# Function to display header
+X='\033[0m'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       # Function to display header
 print_header() {
     clear
-    echo -e "${LG}------------------------------------------------${N}\n"
-    }
-
+    echo -e "${LG}------------------------------------------------${N}\n"                                                                                                                                                                                                    }                                                                                                                                                                                                                                                                    
 # Function to update packages
-update_packages() {
-    echo -e "${Y}${L}\n Updating... \n${N}"
+update_packages() {                                                                                                                                                                                                                                                          echo -e "${Y}${L}\n Updating... \n${N}"
     pkg update && pkg upgrade -y
     clear
 }
 
-# Function to install Python and dependencies
-install_python() {
-    echo -e "${Y}${L}\n Installing python... ${N}"
-    pkg install python -y
-    pkg install python-pip -y
+# Function to install Python and dependencies                                                                                                                                                                                                                            install_python() {                                                                                                                                                                                                                                                           echo -e "${Y}${L}\n Installing python... ${N}"                                                                                                                                                                                                                           pkg install python -y
+    pkg install python-pip -y                                                                                                                                                                                                                                                clear                                                                                                                                                                                                                                                                    sleep 0.2                                                                                                                                                                                                                                                            }
+
+# Function to install Jq
+install_jq() {
+    echo -e "${Y}${L}\n InsTaLing jq... \n${N}"
+    pkg install jq -y
     clear
-    sleep 0.2
 }
 
 # Function to install ffmpeg
@@ -71,8 +63,7 @@ setup_configs() {
     sleep 1.5
     echo -e "${Y}${L}\n Creating youtube-dl config... \n${N}"
     rm -rf ~/.config/yt-dlp
-    mkdir -p ~/.config/yt-dlp
-    sleep 1.5
+    mkdir -p ~/.config/yt-dlp                                                                                                                                                                                                                                                sleep 1.5
     echo -e "${Y}${L}\n Getting config file... \n${N}"
     wget -q https://raw.githubusercontent.com/juniorsir/Download-from-anywhere-/main/config -P ~/.config/yt-dlp
     cd ~/.config/yt-dlp || exit 1
@@ -83,7 +74,7 @@ setup_configs() {
 # Function to set up executable scripts
 setup_executables() {
     echo -e "${Y}${L}\n Creating bin folder... \n${N}"
-    
+....
     sleep 1.5
     echo -e "${Y}${L}\n Getting files...\n${N}"
     rm -rf /data/data/com.termux/files/usr/bin/web
