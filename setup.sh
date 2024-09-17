@@ -78,7 +78,7 @@ setup_executables() {
     sleep 1.5
     echo -e "${Y}${L}\n Getting files...\n${N}"
     rm -rf /data/data/com.termux/files/usr/bin/web
-    wget  https://raw.githubusercontent.com/juniorsir/Download-from-anywhere-/main/run.sh
+    wget  https://raw.githubusercontent.com/juniorsir/Download-from-anywhere-/main/web.sh
     mv run.sh /data/data/com.termux/files/usr/bin/web || exit 1
     chmod +x /data/data/com.termux/files/usr/bin/web
     clear
