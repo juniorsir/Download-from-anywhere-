@@ -2,7 +2,7 @@
 
 #JuniorSir
 
-# Colors                                                                                                                                                       # ----------------------------------------                                                                                                                     BL='\e[01;90m' > /dev/null 2>&1; # Black
+# Colors                                                                                                                                                       # ----------------------------------------
 R='\e[01;91m' > /dev/null 2>&1; # Red
 G='\e[01;92m' > /dev/null 2>&1; # Green
 Y='\e[01;93m' > /dev/null 2>&1; # Yellow                                                                                                                       B='\e[01;0m' > /dev/null 2>&1; # Blue
@@ -17,8 +17,53 @@ X='\033[0m' > /dev/null 2>&1; #Closer
 
 clear
 
+# Check if yt-dlp is installed
+if ! command -v yt-dlp &> /dev/null
+then
+    echo "yt-dlp not found. Please install it first."
+    sleep 2
+    echo -e $G "yt-dlp is InStaLling...."
+    pip install youtube-dl
+# or
+    pip install yt-dlp
+
+fi
+
+# Prompt user for URL
+ echo -e $G
+read -p "Enter the video URL: " URL
+
+# Use yt-dlp to get video information
+INFO=$(yt-dlp --print-json "$URL")
+
+# Extracting required information from JSON output
+TITLE=$(echo "$INFO" | jq -r '.title')
+UPLOADER=$(echo "$INFO" | jq -r '.uploader')
+UPLOAD_DATE=$(echo "$INFO" | jq -r '.upload_date')
+VIDEO_URL=$(echo "$INFO" | jq -r '.webpage_url')
+
+# Display the information
+echo -e $G "Video Title: $TITLE"
+echo -e $G "Uploaded By: $UPLOADER"
+echo -e $G "Upload Date: $UPLOAD_DATE"
+echo -e $G "Video URL: $VIDEO_URL"
+
+# Ask for user confirmation
+read -p "Do you want to continue? (y/n): " RESPONSE
+
+# Check user response
+if [[ "$RESPONSE" == "y" || "$RESPONSE" == "Y" ]]
+then
+    echo "Proceeding..."
+    # Add any additional actions here
+else
+    echo "Exiting."
+    exit 0
+fi
+
+
 # Check if URL is provided
-if [ -z "$1" ]; then
+if [ -z "$URL" ]; then
     echo -e ${L}${G}"\n  Please! use this format- bash dl2.sh <URL>..\n"$N
     exit 1
 fi
@@ -52,18 +97,16 @@ do
     read INPUT_STRING
     case $INPUT_STRING in
 
-        1)
-            echo "-x --no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestaudio\" --extract-audio --audio-format mp3 --audio-quality 0" > ~/.config/yt-dlp/config
-            yt-dlp $1
+        1)                                                                                                                                                                                                                                                                           echo "-x --no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestaudio\" --extract-audio --audio-format mp3 --audio-quality 0" > ~/.config/yt-dlp/config
+            yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
-        ;;
-
+        ;;                                                                                                                                                                                                                                                               
         2)
 
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            yt-dlp $1
+            yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
@@ -71,14 +114,14 @@ do
 
         3)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            yt-dlp $1
+            yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
         ;;
         4)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            yt-dlp $1
+            yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
@@ -86,7 +129,7 @@ do
 
         5)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            yt-dlp $1
+            yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
@@ -94,7 +137,7 @@ do
 
         6)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            yt-dlp $1
+            yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
@@ -102,7 +145,7 @@ do
 
         7)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            yt-dlp -o - | mpv - $1
+            yt-dlp -o - | mpv - $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
@@ -118,9 +161,6 @@ do
             echo -e "$R\n   Wrong input! Please Enter again::\n$W"
     esac
 done
-
-
-
 
 
 
