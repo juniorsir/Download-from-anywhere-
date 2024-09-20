@@ -35,9 +35,10 @@ termux-setup-storage
 
 
 ```
-1) Open YouTube playlist/video
+1) Open YouTube or any website playlist/video
 2) Click on share button
-3) Now, select Termux
+3) Now, copy the share url
+4) Go to termux and type web and paste url then enter 
 ```
 
 #### (You can see your downloaded playlist/videos in the "YouTube" folder of your internal storage.)
