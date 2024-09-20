@@ -2,7 +2,7 @@
 
 #JuniorSir
 
-# Colors                                                                                                                                                       # ----------------------------------------
+# Colors                                                                                                                                                       # ----------------------------------------                                                                                                                     BL='\e[01;90m' > /dev/null 2>&1; # Black
 R='\e[01;91m' > /dev/null 2>&1; # Red
 G='\e[01;92m' > /dev/null 2>&1; # Green
 Y='\e[01;93m' > /dev/null 2>&1; # Yellow                                                                                                                       B='\e[01;0m' > /dev/null 2>&1; # Blue
@@ -32,6 +32,26 @@ fi
 # Prompt user for URL
  echo -e $G
 read -p "Enter the video URL: " URL
+
+
+# Ask for user confirmation
+read -p "Plese select the content type.. [adult/normal]: " RESPONSE
+
+# Check user response
+if [[ "$RESPONSE" == "adult" || "$RESPONSE" == "Adult" ]]
+then
+    echo "Proceeding..."
+
+    QUALITY="${2:-best}" # Default to 'best' quality if not provided
+
+# Download video with specified quality
+yt-dlp -f "$QUALITY" "$URL"
+  exit    
+
+# Add any additional actions here                               
+else
+    echo "Wait..."
+   fi
 
 # Use yt-dlp to get video information
 INFO=$(yt-dlp --print-json "$URL")
@@ -64,7 +84,7 @@ fi
 
 # Check if URL is provided
 if [ -z "$URL" ]; then
-    echo -e ${L}${G}"\n  Please! use this format- bash dl2.sh <URL>..\n"$N
+    echo -e ${L}${G}"\n  Please! use this format- bash web.sh <URL>..\n"$N
     exit 1
 fi
 
@@ -97,12 +117,14 @@ do
     read INPUT_STRING
     case $INPUT_STRING in
 
-        1)                                                                                                                                                                                                                                                                           echo "-x --no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestaudio\" --extract-audio --audio-format mp3 --audio-quality 0" > ~/.config/yt-dlp/config
+        1)
+            echo "-x --no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestaudio\" --extract-audio --audio-format mp3 --audio-quality 0" > ~/.config/yt-dlp/config
             yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
-        ;;                                                                                                                                                                                                                                                               
+        ;;
+
         2)
 
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
@@ -161,7 +183,6 @@ do
             echo -e "$R\n   Wrong input! Please Enter again::\n$W"
     esac
 done
-
 
 
 
