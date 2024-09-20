@@ -1,25 +1,32 @@
-
 R='\e[01;91m'
 G='\e[01;92m'
-Y='\e[01;93m'                                                                                                                                                                                                                                                            LG='\e[01;37m'
+Y='\e[01;93m'
+LG='\e[01;37m'
 N='\e[0m'
 L='\033[7m'
-X='\033[0m'                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       # Function to display header
+X='\033[0m'
+
 print_header() {
     clear
-    echo -e "${LG}------------------------------------------------${N}\n"                                                                                                                                                                                                    }                                                                                                                                                                                                                                                                    
+    echo -e "${LG}------------------------------------------------${N}\n"
+}
+
 # Function to update packages
-update_packages() {                                                                                                                                                                                                                                                          echo -e "${Y}${L}\n Updating... \n${N}"
+update_packages() { 
+    echo -e "${Y}${L}\n Updating... \n${N}"
     pkg update && pkg upgrade -y
     clear
 }
 
-# Function to install Python and dependencies                                                                                                                                                                                                                            install_python() {                                                                                                                                                                                                                                                           echo -e "${Y}${L}\n Installing python... ${N}"                                                                                                                                                                                                                           pkg install python -y
-    pkg install python-pip -y                                                                                                                                                                                                                                                clear                                                                                                                                                                                                                                                                    sleep 0.2                                                                                                                                                                                                                                                            }
+# Function to install Python and dependencies
+install_python() {
+    pkg install python-pip -y
+    clear
+}
 
 # Function to install Jq
 install_jq() {
-    echo -e "${Y}${L}\n InsTaLing jq... \n${N}"
+    echo -e "${Y}${L}\n Installing jq... \n${N}"
     pkg install jq -y
     clear
 }
@@ -32,10 +39,10 @@ install_ffmpeg() {
 }
 
 # Function to install mpv
-install_mpv(){
-     echo -e "${Y}${L}\n Installing mpv... \n${N}"
-     pkg install mpv -y
-     clear
+install_mpv() {
+    echo -e "${Y}${L}\n Installing mpv... \n${N}"
+    pkg install mpv -y
+    clear
 }
 
 # Function to install wget
@@ -56,14 +63,15 @@ install_youtube_dl() {
 
 # Function to set up configurations
 setup_configs() {
-    echo -e "${Y}${L}\n Setting up configs..." $G" JuniorSir \n${N}"
+    echo -e "${Y}${L}\n Setting up configs... $G JuniorSir \n${N}"
     sleep 2
     echo -e "${Y}${L}\n Creating Web Videos folder... \n${N}"
     mkdir -p ~/storage/webvideos
     sleep 1.5
     echo -e "${Y}${L}\n Creating youtube-dl config... \n${N}"
     rm -rf ~/.config/yt-dlp
-    mkdir -p ~/.config/yt-dlp                                                                                                                                                                                                                                                sleep 1.5
+    mkdir -p ~/.config/yt-dlp
+    sleep 1.5
     echo -e "${Y}${L}\n Getting config file... \n${N}"
     wget -q https://raw.githubusercontent.com/juniorsir/Download-from-anywhere-/main/config -P ~/.config/yt-dlp
     cd ~/.config/yt-dlp || exit 1
@@ -74,12 +82,11 @@ setup_configs() {
 # Function to set up executable scripts
 setup_executables() {
     echo -e "${Y}${L}\n Creating bin folder... \n${N}"
-....
     sleep 1.5
     echo -e "${Y}${L}\n Getting files...\n${N}"
     rm -rf /data/data/com.termux/files/usr/bin/web
-    wget  https://raw.githubusercontent.com/juniorsir/Download-from-anywhere-/main/web.sh
-    mv run.sh /data/data/com.termux/files/usr/bin/web || exit 1
+    wget https://raw.githubusercontent.com/juniorsir/Download-from-anywhere-/main/web.sh
+    mv web.sh /data/data/com.termux/files/usr/bin/web || exit 1
     chmod +x /data/data/com.termux/files/usr/bin/web
     clear
 }
@@ -89,7 +96,7 @@ main() {
     print_header
     update_packages
     print_header
-    echo -e "${Y}${L}\n YouTube-dl Installer By" $G" JuniorSir \n${N}"
+    echo -e "${Y}${L}\n YouTube-dl Installer By $G JuniorSir \n${N}"
     install_python
     echo -e "${Y}${L}\n Installing ffmpeg... \n${N}"
     install_ffmpeg
@@ -99,9 +106,9 @@ main() {
     install_youtube_dl
     setup_configs
     setup_executables
-    echo -e "${Y}${L}\n Finishing configuration..." $G" JuniorSir \n${N}"
+    echo -e "${Y}${L}\n Finishing configuration... $G JuniorSir \n${N}"
     sleep 3.5
-    echo -e "${G}\n   Installation Finished...\n${N}"
+    echo -e "${G}\n Installation Finished...\n${N}"
     kill -1 $PPID
 }
 
