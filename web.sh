@@ -179,7 +179,7 @@ do
 
         7)
             termux-toast "Background playing...🎧"
-            yt-dlp -o - | mpv - $URL
+            mpv $URL
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
