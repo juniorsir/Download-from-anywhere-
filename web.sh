@@ -27,6 +27,8 @@ then
 # or
     pip install yt-dlp
 
+    pkg install jq -y
+
 fi
 
 # Prompt user for URL
