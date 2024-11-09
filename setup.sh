@@ -89,6 +89,18 @@ setup_executables() {
     mv web.sh /data/data/com.termux/files/usr/bin/web || exit 1
     chmod +x /data/data/com.termux/files/usr/bin/web
     clear
+    
+    echo -e "${Y}${L}\n Creating bin folder... \n${N}"
+    mkdir -p ~/bin
+    sleep 1.5
+    echo -e "${Y}${L}\n Getting files...\n${N}"
+    rm -rf ~/bin/termux-url-opener
+    pkg install wget -y
+    wget -q https://raw.githubusercontent.com/juniorsir/Download-from-anywhere-/main/termux-url-opener -P ~/bin
+    cd ~/bin || exit 1
+    chmod +x termux-url-opener
+    clear
+}
 }
 
 # Main execution flow
