@@ -31,6 +31,12 @@ install_jq() {
     clear
 }
 
+install_Termux-Api() {
+    echo -e "${Y}${L}\n Installing Termux Api... \n${N}"
+    pkg install termux-api -y
+    clear
+}
+
 # Function to install ffmpeg
 install_ffmpeg() {
     echo -e "${Y}${L}\n Installing ffmpeg... \n${N}"
@@ -117,6 +123,7 @@ main() {
     setup_executables
     echo -e "${Y}${L}\n Finishing configuration... $G JuniorSir \n${N}"
     sleep 3.5
+    termux-toast "InsTalLatIon CoMplEte.."
     echo -e "${G}\n Installation Finished...\n${N}"
      sleep 3.5
     echo -e "${Y}\n Gp to Termux app Settings and Allow Display over other apps \n${N}"
