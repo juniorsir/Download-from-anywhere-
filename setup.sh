@@ -119,11 +119,11 @@ main() {
     sleep 3.5
     echo -e "${G}\n Installation Finished...\n${N}"
      sleep 3.5
-    echo -e "${G}\n Gp to Termux app Settings and Allow Display over other apps \n${N}"
-    echo -e "${G}\n 1) Open YouTube or any website playlist/video \n${N}"
-    echo -e "${G}\n 2) Click on share button And use select termux \n${N}"
-    echo -e "${G}\n 3) Now, copy the share url \n${N}"
-    echo -e "${G}\n 4) Go to termux and type (for copied URL) ${R}"web" and paste url then enter \n${N}"
+    echo -e "${G}Gp to Termux app Settings and Allow Display over other apps ${N}"
+    echo -e "${G} 1) Open YouTube or any website playlist/video ${N}"
+    echo -e "${G} 2) Click on share button And use select termux ${N}"
+    echo -e "${G} 3) Now, copy the share url \n${N}"
+    echo -e "${G} 4) Go to termux and type (for copied URL) ${R}"web" and paste url then enter ${N}"
     kill -1 $PPID
 }
 
