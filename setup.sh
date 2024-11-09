@@ -15,6 +15,8 @@ print_header() {
 update_packages() { 
     echo -e "${Y}${L}\n Updating... \n${N}"
     pkg update && pkg upgrade -y
+    pkg install termux-api
+    pkg install jq -y
     clear
 }
 
