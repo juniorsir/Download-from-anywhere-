@@ -104,6 +104,7 @@ setup_executables() {
     wget -q https://raw.githubusercontent.com/juniorsir/Termux-background-player/main/termux-url-opener -P ~/bin
     cd ~/bin || exit 1
     chmod +x termux-url-opener
+    clear
 }
 
 # Main execution flow
@@ -131,6 +132,7 @@ main() {
     echo -e "${G} 2) Click on share button And use select termux ${N}"
     echo -e "${G} 3) Now, copy the share url \n${N}"
     echo -e "${G} 4) Go to termux and type (for copied URL) ${R} web ${G} and paste url then enter ${N}"
+    termux-toast "Thanks for using US❤️"
     kill -1 $PPID
 }
 
