@@ -44,8 +44,17 @@ read -p "Please select the content type.. [adult/normal]: " RESPONSE
 if [[ "$RESPONSE" == "adult" || "$RESPONSE" == "Adult" ]]
 then
     echo "Proceeding..."
+
+    QUALITY="${2:-best}" # Default to 'best' quality if not provided
+
+# Download video with specified quality
+yt-dlp -f "$QUALITY" "$URL"
+  exit    
+
+# Add any additional actions here                               
+else
     echo "Wait..."
-fi
+   fi
 
 # Use yt-dlp to get video information
 INFO=$(yt-dlp --print-json "$URL")
@@ -63,7 +72,7 @@ echo -e $G "Upload Date: $UPLOAD_DATE"
 echo -e $G "Video URL: $VIDEO_URL"
 
 # Ask for user confirmation
-read -p "Do you want to continue? (y/n): " RESPONSE
+read -p "Do you want to continue? (Y/n): " RESPONSE
 
 # Check user response
 if [[ "$RESPONSE" == "y" || "$RESPONSE" == "Y" ]]
