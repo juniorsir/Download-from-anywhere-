@@ -120,8 +120,9 @@ do
         1)
             echo "-x --no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestaudio\" --extract-audio --audio-format mp3 --audio-quality 0" > ~/.config/yt-dlp/config
             yt-dlp $URL
-            termux-toast "Downloading..."
+            termux-toast "Downloading...🤗"
             echo -e $G"\n   Finished...\n"$N
+            termux-toast "Downloaded...😚"
             sleep 1
             exit
         ;;
@@ -130,8 +131,9 @@ do
 
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
             yt-dlp $URL
-            termux-toast "Downloading..."
+            termux-toast "Downloading...🤗"
             echo -e $G"\n   Finished...\n"$N
+            termux-toast "Downloaded...😚"
             sleep 1
             exit
         ;;
@@ -139,16 +141,18 @@ do
         3)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
             yt-dlp $URL
-            termux-toast "Downloading..."
+            termux-toast "Downloading...🤗"
             echo -e $G"\n   Finished...\n"$N
+            termux-toast "Downloaded...😚"
             sleep 1
             exit
         ;;
         4)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
             yt-dlp $URL
-            termux-toast "Downloading..."
+            termux-toast "Downloading...🤗"
             echo -e $G"\n   Finished...\n"$N
+            termux-toast "Downloaded...😚"
             sleep 1
             exit
         ;;
@@ -156,8 +160,9 @@ do
         5)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
             yt-dlp $URL
-            termux-toast "Downloading..."
+            termux-toast "Downloading...🤗"
             echo -e $G"\n   Finished...\n"$N
+            termux-toast "Downloaded...😚"
             sleep 1
             exit
         ;;
@@ -165,8 +170,9 @@ do
         6)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
             yt-dlp $URL
-            termux-toast "Downloading..."
+            termux-toast "Downloading...🤗"
             echo -e $G"\n   Finished...\n"$N
+            termux-toast "Downloaded...😚"
             sleep 1
             exit
         ;;
@@ -174,7 +180,7 @@ do
         7)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
             yt-dlp -o - | mpv - $URL
-            termux-toast "Background playing..."
+            termux-toast "Background playing...🎧"
             echo -e $G"\n   Finished...\n"$N
             sleep 1
             exit
