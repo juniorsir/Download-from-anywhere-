@@ -124,10 +124,10 @@ main() {
     setup_executables
     echo -e "${Y}${L}\n Finishing configuration... $G JuniorSir \n${N}"
     sleep 3.5
-    termux-toast "InsTalLatIon CoMplEte.."
+    termux-toast "InsTalLatIon CoMplEte...😇"
     echo -e "${G}\n Installation Finished...\n${N}"
      sleep 3.5
-    echo -e "${Y}\n Gp to Termux app Settings and Allow Display over other apps \n${N}"
+    echo -e "${Y}\n Go to Termux app Settings and Allow Display over other apps \n${N}"
     echo -e "${G} 1) Open YouTube or any website playlist/video ${N}"
     echo -e "${G} 2) Click on share button And use select termux ${N}"
     echo -e "${G} 3) Now, copy the share url \n${N}"
