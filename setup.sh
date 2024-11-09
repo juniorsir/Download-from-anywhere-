@@ -123,7 +123,7 @@ main() {
     echo -e "${G} 1) Open YouTube or any website playlist/video ${N}"
     echo -e "${G} 2) Click on share button And use select termux ${N}"
     echo -e "${G} 3) Now, copy the share url \n${N}"
-    echo -e "${G} 4) Go to termux and type (for copied URL) ${N} ${R} web ${G} and paste url then enter ${N}"
+    echo -e "${G} 4) Go to termux and type (for copied URL) ${R} web ${G} and paste url then enter ${N}"
     kill -1 $PPID
 }
 
