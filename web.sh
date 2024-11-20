@@ -97,10 +97,10 @@ echo -e $Y"      _    ( + | S | I | R | + )"$N
 echo -e $R"        \ _ \_/ \_/ \_/ \_/ \_/ "$N
 
 echo -e $C "╔════════════════════════════════════════╗"
-echo -e $G "║ ==> Project Name  :Termux-YDL          ║"
-echo -e $G "║ ==> Author        :JuniorSir           ║"
-echo -e $G "║ ==> Github                             ║"
-echo -e $G "║ ==> Telegram      :juniorsir_bot       ║"
+echo -e $G "║ ==> Project Name         :Termux-YDL          ║"
+echo -e $G "║ ==> Author               :JuniorSir           ║"
+echo -e $G "║ ==> Github               :Coming Soon         ║"
+echo -e $G "║ ==> Telegram             :juniorsir_bot       ║"
 echo -e $C "╠════════════════════════════════════════╝"
 echo -e $C "╠═▶ [ Select Format:: ]"
 echo -e $G "╠═▶ [1] Music Mp3♫"
@@ -121,10 +121,10 @@ do
 
         1)
             echo "-x --no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestaudio\" --extract-audio --audio-format mp3 --audio-quality 0" > ~/.config/yt-dlp/config
-            termux-toast "Downloading...🤗"
+            termux-toast "Downloading...🤗 (mp3)"
             yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
-            termux-toast "Downloaded...😚"
+            termux-toast "Downloaded...😚(mp3)"
             sleep 1
             exit
         ;;
@@ -132,7 +132,7 @@ do
         2)
 
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            termux-toast "Downloading...🤗"
+            termux-toast "Downloading...🤗(360p)"
             yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             termux-toast "Downloaded...😚"
@@ -142,7 +142,7 @@ do
 
         3)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            termux-toast "Downloading...🤗"
+            termux-toast "Downloading...🤗(480p)"
             yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             termux-toast "Downloaded...😚"
@@ -151,7 +151,7 @@ do
         ;;
         4)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            termux-toast "Downloading...🤗"
+            termux-toast "Downloading...🤗(720p)"
             yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             termux-toast "Downloaded...😚"
@@ -161,7 +161,7 @@ do
 
         5)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            termux-toast "Downloading...🤗"
+            termux-toast "Downloading...🤗(1080p)"
             yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             termux-toast "Downloaded...😚"
@@ -171,7 +171,7 @@ do
 
         6)
             echo "--no-mtime -o /data/data/com.termux/files/home/storage/webvideos/%(title)s.%(ext)s -f \"bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]\"" > ~/.config/yt-dlp/config
-            termux-toast "Downloading...🤗"
+            termux-toast "Downloading...🤗(2160p)"
             yt-dlp $URL
             echo -e $G"\n   Finished...\n"$N
             termux-toast "Downloaded...😚"
