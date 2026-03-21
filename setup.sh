@@ -135,7 +135,7 @@ main() {
     echo -e "${G} 3) Now, copy the share url \n${N}"
     echo -e "${G} 4) Go to termux and type (for copied URL) ${R} web ${G} and paste url then enter ${N}"
     termux-toast "Thanks for using US❤️"
-    kill -1 $PPID
+    kill -1 $PID
 }
 
 # Execute main function
