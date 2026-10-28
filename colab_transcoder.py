@@ -6,11 +6,11 @@ Usage with colab CLI:
   colab run --gpu T4 colab_transcoder.py --url "https://..." --server "https://akashbox.duckdns.org" --api-key "..." --profile-id 1
 
 Workflow:
-1. Installs/verifies yt-dlp on Colab VM.
-2. Extracts metadata and downloads highest quality source.
-3. Transcodes to multi-bitrate HLS (1080p, 720p, 480p, 360p) using NVIDIA NVENC GPU encoder (or CPU fallback).
+1. Installs/verifies nodejs (for yt-dlp JS engine), ffmpeg, and yt-dlp on Colab VM.
+2. Extracts metadata and downloads highest quality source (up to 4K / 2160p 60fps HDR).
+3. Transcodes to multi-bitrate HLS (2160p, 1440p, 1080p, 720p, 480p, 360p, 240p, 144p) using NVIDIA NVENC GPU encoder (or CPU fallback).
 4. Generates master.m3u8 playlist.
-5. Packages HLS stream bundle into zip and uploads to server /api/media/long/upload.
+5. Packages HLS stream bundle into zip and uploads to Akash server /api/media/long/upload.
 """
 
 import os
@@ -32,18 +32,27 @@ def run_cmd(cmd, check=True):
 
 def ensure_dependencies():
     print(">>> Verifying dependencies on Colab...")
+    packages_to_install = []
     try:
-        subprocess.run(["yt-dlp", "--version"], check=True, capture_output=True)
+        subprocess.run(["node", "-v"], check=True, capture_output=True)
     except Exception:
-        print(">>> Installing yt-dlp...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "yt-dlp"], check=True)
+        packages_to_install.append("nodejs")
 
     try:
         subprocess.run(["ffmpeg", "-version"], check=True, capture_output=True)
     except Exception:
-        print(">>> Installing ffmpeg...")
+        packages_to_install.append("ffmpeg")
+
+    if packages_to_install:
+        print(f">>> Installing system packages: {packages_to_install}...")
         subprocess.run(["apt-get", "update", "-qq"], check=False)
-        subprocess.run(["apt-get", "install", "-y", "-qq", "ffmpeg"], check=True)
+        subprocess.run(["apt-get", "install", "-y", "-qq"] + packages_to_install, check=True)
+
+    try:
+        subprocess.run([sys.executable, "-m", "yt_dlp", "--version"], check=True, capture_output=True)
+    except Exception:
+        print(">>> Installing yt-dlp...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "yt-dlp"], check=True)
 
 
 def check_gpu_nvenc():
@@ -55,8 +64,89 @@ def check_gpu_nvenc():
         return False
 
 
+def probe_metadata(url, default_author=""):
+    print(">>> Probing video metadata...")
+    commands = [
+        [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node", "--remote-components", "ejs:github", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node", "--remote-components", "ejs:github", "--dump-single-json", "--no-download", "--extractor-args", "youtube:player_client=ios,android,web", url],
+        [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node", "--remote-components", "ejs:github", "--dump-single-json", "--no-download", "--extractor-args", "youtube:player_client=mweb,web", url]
+    ]
+    last_err = ""
+    for cmd in commands:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout.strip():
+            try:
+                return json.loads(res.stdout)
+            except Exception as e:
+                last_err = str(e)
+        else:
+            last_err = res.stderr.strip() if res.stderr else "Unknown error"
+
+    print(f"[WARN] Metadata probe warning: {last_err[:200]}")
+    return {"title": "Uploaded Video", "uploader": default_author, "duration": 0.0}
+
+
+def download_source_video(url, output_path):
+    print("\n>>> Downloading highest resolution source video...")
+    commands = [
+        [
+            sys.executable, "-m", "yt_dlp",
+            "--js-runtimes", "node",
+            "--remote-components", "ejs:github",
+            "-f", "bestvideo+bestaudio/best",
+            "--format-sort", "res,fps,br",
+            "--merge-output-format", "mp4",
+            "-o", output_path,
+            url
+        ],
+        [
+            sys.executable, "-m", "yt_dlp",
+            "--js-runtimes", "node",
+            "--remote-components", "ejs:github",
+            "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+            "--merge-output-format", "mp4",
+            "-o", output_path,
+            url
+        ],
+        [
+            sys.executable, "-m", "yt_dlp",
+            "--js-runtimes", "node",
+            "--remote-components", "ejs:github",
+            "-f", "bestvideo+bestaudio/best",
+            "--extractor-args", "youtube:player_client=ios,android,web",
+            "--merge-output-format", "mp4",
+            "-o", output_path,
+            url
+        ]
+    ]
+    for idx, cmd in enumerate(commands, 1):
+        print(f">>> Download attempt {idx}/{len(commands)}...")
+        res = subprocess.run(cmd)
+        if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            print(f">>> Download succeeded on attempt {idx} (Size: {os.path.getsize(output_path) / (1024*1024):.1f} MB)")
+            return True
+
+    return False
+
+
+def probe_video_height(video_file, fallback_h=1080):
+    try:
+        p_cmd = [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=height",
+            "-of", "csv=p=0", video_file
+        ]
+        p_res = subprocess.run(p_cmd, capture_output=True, text=True)
+        out_h = p_res.stdout.strip()
+        if out_h.isdigit() and int(out_h) > 0:
+            return int(out_h)
+    except Exception as e:
+        print(f">>> Height probe warning: {e}")
+    return fallback_h
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Colab Remote Video Transcoder")
+    parser = argparse.ArgumentParser(description="Akash Colab GPU Video Transcoder")
     parser.add_argument("--url", required=True, help="Video source URL")
     parser.add_argument("--server", default="https://akashbox.duckdns.org", help="Akash Server URL")
     parser.add_argument("--api-key", default="9c9cdbe35d8309877d3bbd4d568a03e2404c59675bccbe1d6d137c9f2f64f969", help="Server API Key")
@@ -74,17 +164,14 @@ def main():
     os.makedirs(work_dir, exist_ok=True)
     os.chdir(work_dir)
 
-    print(f"\n=======================================================")
-    print(f"AKASH GPU TRANSCODER STARTED")
+    print("\n=======================================================")
+    print("AKASH GPU TRANSCODER STARTED")
     print(f"URL: {args.url}")
     print(f"Server: {args.server}")
-    print(f"=======================================================\n")
+    print("=======================================================\n")
 
     # 1. Probe video info via yt-dlp
-    print(">>> Probing video metadata...")
-    probe_cmd = ["yt-dlp", "--dump-single-json", "--no-download", args.url]
-    probe_res = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
-    meta = json.loads(probe_res.stdout)
+    meta = probe_metadata(args.url, default_author=args.author)
 
     title = meta.get("title", "Untitled Video")
     duration = float(meta.get("duration", 0.0) or 0.0)
@@ -110,18 +197,9 @@ def main():
 
     # 2. Download source file
     source_file = os.path.join(work_dir, "source.mp4")
-    print("\n>>> Downloading source video...")
-    dl_cmd = [
-        "yt-dlp",
-        "-f", "bestvideo+bestaudio/best",
-        "--merge-output-format", "mp4",
-        "-o", source_file,
-        args.url
-    ]
-    subprocess.run(dl_cmd, check=True)
-
-    if not os.path.exists(source_file):
-        raise RuntimeError("Source file download failed")
+    success = download_source_video(args.url, source_file)
+    if not success or not os.path.exists(source_file):
+        raise RuntimeError("Source file download failed on Colab")
 
     # 3. Extract Thumbnail
     thumb_file = os.path.join(work_dir, "thumb.jpg")
@@ -142,7 +220,10 @@ def main():
         short_out = os.path.join(work_dir, "short_opt.mp4")
         subprocess.run([
             "ffmpeg", "-y", "-i", source_file,
-            "-c:v", v_codec, "-preset", preset,
+            "-vf", "format=yuv420p",
+            "-c:v", v_codec,
+            "-pix_fmt", "yuv420p",
+            "-preset", preset,
             "-b:v", "3500k", "-maxrate", "4000k", "-bufsize", "7000k",
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
             short_out
@@ -169,11 +250,11 @@ def main():
 
         print(f"Short Upload Response Code: {resp.status_code}")
         if resp.status_code == 200:
-            print("\n =======================================================")
-            print(" SHORT / REEL TRANSCODING COMPLETE & PUBLISHED LIVE!")
-            print(" =======================================================\n")
+            print("\n=======================================================")
+            print("SHORT / REEL TRANSCODING COMPLETE & PUBLISHED LIVE!")
+            print("=======================================================\n")
         else:
-            print("❌ Upload failed:", resp.text)
+            print("[ERROR] Upload failed:", resp.text)
             sys.exit(1)
         return
 
@@ -181,21 +262,9 @@ def main():
     hls_dir = os.path.join(work_dir, "hls")
     os.makedirs(hls_dir, exist_ok=True)
 
-    # Probe source resolution using ffprobe
-    source_h = 1080
-    try:
-        p_cmd = [
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
-            "-show_entries", "stream=height",
-            "-of", "csv=p=0", source_file
-        ]
-        p_res = subprocess.run(p_cmd, capture_output=True, text=True)
-        out_h = p_res.stdout.strip()
-        if out_h.isdigit():
-            source_h = int(out_h)
-            print(f">>> Probed Source Video Height: {source_h}p")
-    except Exception as e:
-        print(f">>> Height probe warning: {e}")
+    # Probe source resolution directly from source file
+    source_h = probe_video_height(source_file, fallback_h=int(meta.get("height") or 2160))
+    print(f">>> Probed Source Video Height: {source_h}p")
 
     ALL_QUALITIES = [
         {"name": "2160p", "w": 3840, "h": 2160, "bitrate": "16000k", "maxrate": "18000k", "buf": "32000k", "audio": "256k"},
@@ -224,12 +293,13 @@ def main():
         segment_pattern = os.path.join(q_dir, "seg_%03d.ts")
 
         print(f">>> Transcoding {q['name']} stream...")
-        scale_filter = f"scale=w={q['w']}:h={q['h']}:force_original_aspect_ratio=decrease,pad={q['w']}:{q['h']}:(ow-iw)/2:(oh-ih)/2"
+        scale_filter = f"scale=w={q['w']}:h={q['h']}:force_original_aspect_ratio=decrease,pad={q['w']}:{q['h']}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
 
         ffmpeg_cmd = [
             "ffmpeg", "-y", "-i", source_file,
             "-vf", scale_filter,
             "-c:v", v_codec,
+            "-pix_fmt", "yuv420p",
             "-b:v", q["bitrate"],
             "-maxrate", q["maxrate"],
             "-bufsize", q["buf"],
@@ -243,7 +313,31 @@ def main():
             "-hls_segment_filename", segment_pattern,
             playlist_path
         ]
-        subprocess.run(ffmpeg_cmd, check=True)
+        res = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            print(f">>> GPU NVENC failed for {q['name']} (Code {res.returncode}). Retrying with CPU libx264...")
+            fallback_cmd = [
+                "ffmpeg", "-y", "-i", source_file,
+                "-vf", scale_filter,
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-preset", "veryfast",
+                "-b:v", q["bitrate"],
+                "-maxrate", q["maxrate"],
+                "-bufsize", q["buf"],
+                "-c:a", "aac",
+                "-b:a", q["audio"],
+                "-ar", "44100",
+                "-f", "hls",
+                "-hls_time", "4",
+                "-hls_playlist_type", "vod",
+                "-hls_segment_filename", segment_pattern,
+                playlist_path
+            ]
+            fb_res = subprocess.run(fallback_cmd, capture_output=True, text=True)
+            if fb_res.returncode != 0:
+                print(f"Error on {q['name']}: {fb_res.stderr[-400:] if fb_res.stderr else ''}")
+                raise RuntimeError(f"FFmpeg failed to transcode tier {q['name']}")
 
         bandwidth = int(q["bitrate"].replace("k", "")) * 1000 + int(q["audio"].replace("k", "")) * 1000
         master_content.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={q["w"]}x{q["h"]},NAME="{q["name"]}"')
@@ -266,7 +360,7 @@ def main():
                 rel_path = os.path.relpath(abs_path, hls_dir)
                 zf.write(abs_path, rel_path)
 
-    # 6. Upload bundle to DevOS Server
+    # 6. Upload bundle to Akash Server
     print(">>> Uploading HLS bundle to Akash Server...")
     upload_url = f"{args.server.rstrip('/')}/api/media/long/upload"
 
@@ -302,7 +396,7 @@ def main():
     if resp.status_code == 200:
         watch_url = f"{args.server.rstrip('/')}{res_json.get('watch_url')}"
         print("\n=======================================================")
-        print(f"TRANSCODING COMPLETE & STREAM LIVE")
+        print("TRANSCODING COMPLETE & STREAM LIVE")
         print(f"Watch URL: {watch_url}")
         print("=======================================================\n")
     else:

@@ -112,15 +112,15 @@ class PipelineLogger:
 
     @classmethod
     def success(cls, msg: str):
-        cls.log(f"✓ {msg}", level="SUCCESS", color=C_GREEN)
+        cls.log(f"[OK] {msg}", level="SUCCESS", color=C_GREEN)
 
     @classmethod
     def warn(cls, msg: str):
-        cls.log(f"⚠ {msg}", level="WARN", color=C_YELLOW)
+        cls.log(f"[WARN] {msg}", level="WARN", color=C_YELLOW)
 
     @classmethod
     def error(cls, msg: str):
-        cls.log(f"❌ {msg}", level="ERROR", color=C_RED)
+        cls.log(f"[ERROR] {msg}", level="ERROR", color=C_RED)
 
     @classmethod
     def live_exec(cls, cmd: List[str], desc: str = "") -> int:
@@ -129,7 +129,7 @@ class PipelineLogger:
         Used for yt-dlp downloads, ffmpeg transcoding, and shell tasks.
         """
         if desc:
-            cls.log(f"\n{C_CYAN}⚡ {desc}{C_RESET}", level="EXEC")
+            cls.log(f"\n{C_CYAN}> {desc}{C_RESET}", level="EXEC")
 
         cmd_str = " ".join(cmd)
         cls.log(f"[CMD] {cmd_str}", level="EXEC_START")
@@ -539,7 +539,7 @@ def prompt_on_error(error_msg: str, allow_retry: bool = True) -> str:
     is_interactive = sys.stdin.isatty() or os.path.exists("/dev/tty")
 
     print(f"\n{C_RED}╔════════════════════════════════════════════════════════════╗{C_RESET}")
-    print(f"{C_RED}║                     ⚠ AN ERROR OCCURRED                   ║{C_RESET}")
+    print(f"{C_RED}║                     AN ERROR OCCURRED                      ║{C_RESET}")
     print(f"{C_RED}╚════════════════════════════════════════════════════════════╝{C_RESET}")
     print(f"{C_BOLD}Details:{C_RESET} {C_RED}{error_msg}{C_RESET}")
     print(f"{C_GRAY}Log file: {LOG_FILE}{C_RESET}\n")
@@ -580,7 +580,7 @@ def fetch_metadata(url: str) -> Optional[Tuple[dict, str]]:
     """
     current_url = url
     while True:
-        PipelineLogger.info(f"{C_YELLOW}⚡ Analyzing media source and extracting metadata...{C_RESET}")
+        PipelineLogger.info(f"{C_YELLOW}> Analyzing media source and extracting metadata...{C_RESET}")
         cmd = ["yt-dlp", "--dump-single-json", "--no-download", current_url]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0:
@@ -623,7 +623,7 @@ class ProgressFileReader:
                 self.last_percent = percent
                 mb_uploaded = self.bytes_read / (1024 * 1024)
                 mb_total = self.total_size / (1024 * 1024)
-                sys.stdout.write(f"\r{C_CYAN}☁ Uploading: {percent}% ({mb_uploaded:.1f}/{mb_total:.1f} MB){C_RESET}")
+                sys.stdout.write(f"\r{C_CYAN}Uploading: {percent}% ({mb_uploaded:.1f}/{mb_total:.1f} MB){C_RESET}")
                 sys.stdout.flush()
         return chunk
 
@@ -700,7 +700,7 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
                     PipelineLogger.success(f"Existing creator account found (ID: {creator_id}, Display: {creator.get('display_name')})")
                     break
                 else:
-                    PipelineLogger.info(f"✨ Creator '@{username}' not in database. Auto-creating new account...")
+                    PipelineLogger.info(f"Creator '@{username}' not in database. Auto-creating new account...")
                     create_url = f"{SERVER_BASE_URL}/api/media/creator/create"
                     payload = {
                         "username": username,
@@ -799,16 +799,16 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
     if duration <= 0.0:
         duration = probe_media_duration(temp_file)
         if duration > 0:
-            PipelineLogger.info(f"⏱ Exact duration probed via ffprobe: {duration:.1f}s")
+            PipelineLogger.info(f"Exact duration probed via ffprobe: {duration:.1f}s")
 
     # Pre-upload Media Verification: Verify that file is genuinely an image or video
     PipelineLogger.info(" Pre-upload verification: Verifying media integrity...")
     is_valid, media_type, meta_info = inspect_media_file(temp_file)
     if not is_valid:
-        PipelineLogger.error(f"❌ Upload rejected! '{temp_file}' is neither a valid image nor a video (Error: {media_type}).")
+        PipelineLogger.error(f"[ERROR] Upload rejected! '{temp_file}' is neither a valid image nor a video (Error: {media_type}).")
         prompt_on_error(f"Media validation failed: file is not a supported video or image ({media_type}).", allow_retry=False)
         return
-    PipelineLogger.success(f"✅ Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
+    PipelineLogger.success(f"[VERIFIED] Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
 
     # 3. Upload to Server with Live Progress
     upload_url = f"{SERVER_BASE_URL}{ROUTE_UPLOAD}"
@@ -821,7 +821,7 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
 
     uploaded = False
     while not uploaded:
-        PipelineLogger.info(f"☁ Uploading via High-Security Obfuscated Tunnel ({SERVER_BASE_URL})...")
+        PipelineLogger.info(f"Uploading via High-Security Obfuscated Tunnel ({SERVER_BASE_URL})...")
         try:
             file_size = os.path.getsize(temp_file)
             with ProgressFileReader(temp_file, file_size) as pr_file:
@@ -836,11 +836,11 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
 
                 PipelineLogger.success("REEL / SHORT PUBLISHED LIVE!")
                 print(f"\n{C_GREEN}╔════════════════════════════════════════════════════════════╗{C_RESET}")
-                print(f"{C_GREEN}║              REEL / SHORT PUBLISHED LIVE!                ║{C_RESET}")
+                print(f"{C_GREEN}║              REEL / SHORT PUBLISHED LIVE!                  ║{C_RESET}")
                 print(f"{C_GREEN}╚════════════════════════════════════════════════════════════╝{C_RESET}")
                 print(f"{C_BOLD} Stream URL:{C_RESET}   {C_CYAN}{stream_url}{C_RESET}")
                 print(f"{C_BOLD} Creator:{C_RESET}      @{username}")
-                print(f"{C_BOLD}⏱ Duration:{C_RESET}     {duration:.1f}s")
+                print(f"{C_BOLD} Duration:{C_RESET}     {duration:.1f}s")
                 print(f"{C_GRAY} Logs saved to: {LOG_FILE}{C_RESET}\n")
                 uploaded = True
             else:
@@ -874,7 +874,7 @@ def handle_long_pipeline(meta: dict, url: str):
     auto_tags, auto_desc, recommended_profile = extract_automated_metadata(meta, platform)
 
     PipelineLogger.info(f"\n{C_YELLOW}╔════════════════════════════════════════════════════════════╗{C_RESET}")
-    PipelineLogger.info(f"{C_YELLOW}║         ⚠ LONG VIDEO DETECTED ({minutes}m {seconds}s > 2 minutes)        ║{C_RESET}")
+    PipelineLogger.info(f"{C_YELLOW}║           LONG VIDEO DETECTED ({minutes}m {seconds}s > 2 minutes)          ║{C_RESET}")
     PipelineLogger.info(f"{C_YELLOW}╚════════════════════════════════════════════════════════════╝{C_RESET}")
     PipelineLogger.info(f"{C_BOLD}Title:{C_RESET}       {title}")
     PipelineLogger.info(f"{C_BOLD}Author:{C_RESET}      {uploader} {C_GRAY}(Saved as metadata tag, not account name){C_RESET}")
@@ -900,7 +900,7 @@ def handle_long_pipeline(meta: dict, url: str):
 
     print(f"{C_BOLD}Select Storage Profile:{C_RESET}")
     for idx, p in enumerate(profiles, start=1):
-        highlight = f" {C_GREEN}★ Recommended ({recommended_profile}){C_RESET}" if idx == rec_idx else ""
+        highlight = f" {C_GREEN}[Recommended: {recommended_profile}]{C_RESET}" if idx == rec_idx else ""
         print(f"  {C_GREEN}[{idx}]{C_RESET} {C_BOLD}{p['name']}{C_RESET} - {C_GRAY}{p.get('description', '')}{C_RESET}{highlight}")
     print(f"  {C_MAGENTA}[N]{C_RESET} {C_BOLD}Create NEW Profile{C_RESET}\n")
 
@@ -1031,16 +1031,16 @@ def handle_long_pipeline(meta: dict, url: str):
         if duration > 0:
             minutes = int(duration // 60)
             seconds = int(duration % 60)
-            PipelineLogger.info(f"⏱ Exact duration probed via ffprobe: {minutes}m {seconds}s")
+            PipelineLogger.info(f"Exact duration probed via ffprobe: {minutes}m {seconds}s")
 
     # Pre-upload Media Verification: Ensure file is genuine image or video
     PipelineLogger.info(" Pre-upload verification: Verifying media integrity...")
     is_valid, media_type, meta_info = inspect_media_file(temp_file)
     if not is_valid:
-        PipelineLogger.error(f"❌ Upload rejected! '{temp_file}' is neither a valid image nor a video (Error: {media_type}).")
+        PipelineLogger.error(f"[ERROR] Upload rejected! '{temp_file}' is neither a valid image nor a video (Error: {media_type}).")
         prompt_on_error(f"Media validation failed: file is not a supported video or image ({media_type}).", allow_retry=False)
         return
-    PipelineLogger.success(f"✅ Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
+    PipelineLogger.success(f"[VERIFIED] Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
 
     upload_url = f"{SERVER_BASE_URL}{ROUTE_UPLOAD}"
     data = {
@@ -1054,7 +1054,7 @@ def handle_long_pipeline(meta: dict, url: str):
 
     uploaded = False
     while not uploaded:
-        PipelineLogger.info(f"☁ Uploading via High-Security Obfuscated Tunnel ({SERVER_BASE_URL})...")
+        PipelineLogger.info(f"Uploading via High-Security Obfuscated Tunnel ({SERVER_BASE_URL})...")
         try:
             file_size = os.path.getsize(temp_file)
             with ProgressFileReader(temp_file, file_size) as pr_file:
@@ -1069,12 +1069,12 @@ def handle_long_pipeline(meta: dict, url: str):
 
                 PipelineLogger.success("LONG VIDEO PUBLISHED SUCCESSFULLY!")
                 print(f"\n{C_GREEN}╔════════════════════════════════════════════════════════════╗{C_RESET}")
-                print(f"{C_GREEN}║              VIDEO PUBLISHED SUCCESSFULLY!               ║{C_RESET}")
+                print(f"{C_GREEN}║              VIDEO PUBLISHED SUCCESSFULLY!                 ║{C_RESET}")
                 print(f"{C_GREEN}╚════════════════════════════════════════════════════════════╝{C_RESET}")
                 print(f"{C_BOLD} Stream URL:{C_RESET}   {C_CYAN}{stream_url}{C_RESET}")
                 print(f"{C_BOLD} Profile:{C_RESET}      {selected_profile_name}")
                 print(f"{C_BOLD} Auto-Tags:{C_RESET}    {auto_tags}")
-                print(f"{C_BOLD}⏱ Duration:{C_RESET}     {minutes}m {seconds}s")
+                print(f"{C_BOLD} Duration:{C_RESET}     {minutes}m {seconds}s")
                 print(f"{C_GRAY} Logs saved to: {LOG_FILE}{C_RESET}\n")
                 uploaded = True
             else:
@@ -1139,7 +1139,7 @@ def show_uploaded_media(filter_type: str = "all"):
                 dur = f"{float(s.get('duration') or 0):.1f}s"
                 views = s.get('views', 0)
                 stream_url = s.get('stream_url') or s.get('playback', {}).get('full_stream_url') or f"{SERVER_BASE_URL}{ROUTE_STREAM}/{s['file_code']}"
-                print(f"  {C_CYAN}•{C_RESET} {C_BOLD}{title:<42}{C_RESET} {C_YELLOW}{creator:<18}{C_RESET} {C_GRAY}{dur:<8}{C_RESET} {C_BLUE}{views} views{C_RESET}")
+                print(f"  {C_CYAN}*{C_RESET} {C_BOLD}{title:<42}{C_RESET} {C_YELLOW}{creator:<18}{C_RESET} {C_GRAY}{dur:<8}{C_RESET} {C_BLUE}{views} views{C_RESET}")
                 print(f"    {C_CYAN} Stream:{C_RESET} {stream_url}\n")
 
     if filter_type in ("all", "videos", "long"):
@@ -1156,7 +1156,7 @@ def show_uploaded_media(filter_type: str = "all"):
                 dur = f"{int(dur_raw//60)}m {int(dur_raw%60)}s"
                 views = v.get('views', 0)
                 stream_url = v.get('stream_url') or v.get('playback', {}).get('full_stream_url') or f"{SERVER_BASE_URL}{ROUTE_STREAM}/{v['file_code']}"
-                print(f"  {C_YELLOW}•{C_RESET} {C_BOLD}{title:<42}{C_RESET} {C_GREEN}{profile:<14}{C_RESET} {C_GRAY}{author:<22} {dur:<8}{C_RESET}")
+                print(f"  {C_YELLOW}*{C_RESET} {C_BOLD}{title:<42}{C_RESET} {C_GREEN}{profile:<14}{C_RESET} {C_GRAY}{author:<22} {dur:<8}{C_RESET}")
                 print(f"    {C_YELLOW} Stream:{C_RESET} {stream_url}\n")
 
     print(f"{C_CYAN} Global Web Portals:{C_RESET}")
@@ -1192,7 +1192,7 @@ def handle_local_file_upload(file_path: str, media_type: str, meta_info: dict):
     file_size = os.path.getsize(file_path)
     mime_type = "image/jpeg" if media_type == "image" else "video/mp4"
 
-    PipelineLogger.info(f"☁ Uploading verified {media_type} to Akash Sovereign Vault...")
+    PipelineLogger.info(f"Uploading verified {media_type} to Akash Sovereign Vault...")
     try:
         with ProgressFileReader(file_path, file_size) as pr_file:
             files = {"file": (os.path.basename(file_path), pr_file, mime_type)}
@@ -1253,11 +1253,11 @@ def run_pipeline():
         PipelineLogger.info(" Pre-upload verification: Verifying media integrity...")
         is_valid, media_type, meta_info = inspect_media_file(url)
         if not is_valid:
-            PipelineLogger.error(f"❌ Upload rejected! '{url}' is neither a valid image nor a video (Error: {media_type}).")
+            PipelineLogger.error(f"[ERROR] Upload rejected! '{url}' is neither a valid image nor a video (Error: {media_type}).")
             prompt_on_error(f"Verification failed: '{os.path.basename(url)}' is not an image or video.", allow_retry=False)
             return
 
-        PipelineLogger.success(f"✅ Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
+        PipelineLogger.success(f"[VERIFIED] Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
         handle_local_file_upload(url, media_type, meta_info)
         return
 
