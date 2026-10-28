@@ -64,6 +64,39 @@ def check_gpu_nvenc():
         return False
 
 
+def run_ffmpeg_with_progress(cmd, label):
+    """Executes FFmpeg with real-time stderr progress streaming."""
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        bufsize=1
+    )
+    buf = ""
+    error_lines = []
+    while True:
+        ch = proc.stderr.read(1)
+        if not ch and proc.poll() is not None:
+            break
+        if ch in ("\r", "\n"):
+            line = buf.strip()
+            if line:
+                if "frame=" in line or "time=" in line or "fps=" in line:
+                    sys.stdout.write(f"\r  [{label}] {line[:80]}")
+                    sys.stdout.flush()
+                else:
+                    error_lines.append(line)
+            buf = ""
+        else:
+            buf += ch
+
+    proc.wait()
+    sys.stdout.write("\n")
+    sys.stdout.flush()
+    return proc.returncode, "\n".join(error_lines[-10:])
+
+
 def probe_metadata(url, default_author=""):
     print(">>> Probing video metadata...")
     commands = [
@@ -218,7 +251,7 @@ def main():
     if args.is_short:
         print(">>> Processing Short / Reel on Colab GPU...")
         short_out = os.path.join(work_dir, "short_opt.mp4")
-        subprocess.run([
+        short_cmd = [
             "ffmpeg", "-y", "-i", source_file,
             "-vf", "format=yuv420p",
             "-c:v", v_codec,
@@ -227,7 +260,23 @@ def main():
             "-b:v", "3500k", "-maxrate", "4000k", "-bufsize", "7000k",
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
             short_out
-        ], check=True)
+        ]
+        rc, err = run_ffmpeg_with_progress(short_cmd, "Short")
+        if rc != 0:
+            print(f">>> GPU NVENC short transcode failed (Code {rc}). Retrying with CPU libx264...")
+            fb_short_cmd = [
+                "ffmpeg", "-y", "-i", source_file,
+                "-vf", "format=yuv420p",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-preset", "veryfast",
+                "-b:v", "3500k", "-maxrate", "4000k", "-bufsize", "7000k",
+                "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+                short_out
+            ]
+            fb_rc, fb_err = run_ffmpeg_with_progress(fb_short_cmd, "Short (CPU)")
+            if fb_rc != 0:
+                raise RuntimeError(f"FFmpeg failed to transcode Short: {fb_err}")
 
         upload_url = f"{args.server.rstrip('/')}/api/media/shorts/upload"
         import requests
@@ -313,9 +362,9 @@ def main():
             "-hls_segment_filename", segment_pattern,
             playlist_path
         ]
-        res = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-        if res.returncode != 0:
-            print(f">>> GPU NVENC failed for {q['name']} (Code {res.returncode}). Retrying with CPU libx264...")
+        rc, err = run_ffmpeg_with_progress(ffmpeg_cmd, q["name"])
+        if rc != 0:
+            print(f">>> GPU NVENC failed for {q['name']} (Code {rc}). Retrying with CPU libx264...")
             fallback_cmd = [
                 "ffmpeg", "-y", "-i", source_file,
                 "-vf", scale_filter,
@@ -334,9 +383,9 @@ def main():
                 "-hls_segment_filename", segment_pattern,
                 playlist_path
             ]
-            fb_res = subprocess.run(fallback_cmd, capture_output=True, text=True)
-            if fb_res.returncode != 0:
-                print(f"Error on {q['name']}: {fb_res.stderr[-400:] if fb_res.stderr else ''}")
+            fb_rc, fb_err = run_ffmpeg_with_progress(fallback_cmd, f"{q['name']} (CPU)")
+            if fb_rc != 0:
+                print(f"Error on {q['name']}: {fb_err[-400:]}")
                 raise RuntimeError(f"FFmpeg failed to transcode tier {q['name']}")
 
         bandwidth = int(q["bitrate"].replace("k", "")) * 1000 + int(q["audio"].replace("k", "")) * 1000
