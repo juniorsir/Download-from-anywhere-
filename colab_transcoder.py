@@ -139,8 +139,7 @@ def download_source_video(url, output_path):
             sys.executable, "-m", "yt_dlp",
             "--js-runtimes", "node",
             "--remote-components", "ejs:github",
-            "-f", "bestvideo+bestaudio/best",
-            "--format-sort", "res,fps,br",
+            "-f", "bestvideo[protocol^=http]+bestaudio[protocol^=http]/bestvideo+bestaudio/best",
             "--merge-output-format", "mp4",
             "--newline",
             "--progress",
@@ -149,16 +148,9 @@ def download_source_video(url, output_path):
         ],
         [
             sys.executable, "-m", "yt_dlp",
+            "--js-runtimes", "node",
+            "--remote-components", "ejs:github",
             "--extractor-args", "youtube:player_client=android",
-            "-f", "bestvideo+bestaudio/best",
-            "--merge-output-format", "mp4",
-            "--newline",
-            "--progress",
-            "-o", output_path,
-            url
-        ],
-        [
-            sys.executable, "-m", "yt_dlp",
             "-f", "bestvideo+bestaudio/best",
             "--merge-output-format", "mp4",
             "--newline",
@@ -169,12 +161,23 @@ def download_source_video(url, output_path):
     ]
     for idx, cmd in enumerate(commands, 1):
         print(f">>> Download attempt {idx}/{len(commands)}...")
-        res = subprocess.run(cmd)
-        if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            print(f">>> Download succeeded on attempt {idx} (Size: {os.path.getsize(output_path) / (1024*1024):.1f} MB)")
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        proc.wait()
+
+        if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            print(f"\n>>> Download succeeded on attempt {idx} (Size: {os.path.getsize(output_path) / (1024*1024):.1f} MB)")
             return True
         else:
-            print(f">>> Download attempt {idx} did not complete. Trying next method...")
+            print(f"\n>>> Download attempt {idx} failed with exit code {proc.returncode}. Trying next method...")
 
     return False
 
