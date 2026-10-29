@@ -35,6 +35,7 @@ C_YELLOW = "\033[93m"
 C_BLUE = "\033[94m"
 C_MAGENTA = "\033[95m"
 C_CYAN = "\033[96m"
+C_WHITE = "\033[97m"
 C_GRAY = "\033[90m"
 
 SERVER_BASE_URL = os.getenv("AKASH_SERVER_URL", os.getenv("DEVOS_SERVER_URL", "https://akashbox.duckdns.org"))
@@ -515,17 +516,11 @@ def extract_automated_metadata(meta: dict, platform: str) -> Tuple[str, str, str
 
 
 def safe_input(prompt_text: str = "") -> str:
-    """Reads user input safely, with fallback to /dev/tty if stdin was redirected."""
+    """Reads user input safely, returning empty string on EOF or closed stdin."""
     try:
         return input(prompt_text).strip()
     except (EOFError, IOError):
-        try:
-            with open("/dev/tty", "r") as tty:
-                sys.stdout.write(prompt_text)
-                sys.stdout.flush()
-                return tty.readline().strip()
-        except Exception:
-            return ""
+        return ""
 
 
 def prompt_on_error(error_msg: str, allow_retry: bool = True) -> str:
