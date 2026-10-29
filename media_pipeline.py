@@ -1033,19 +1033,15 @@ def handle_long_pipeline(meta: dict, url: str):
     PipelineLogger.success(f"Assigned Storage Profile: '{selected_profile_name}'")
 
     # 3. Processing Engine Selection
-    if platform == "youtube":
-        PipelineLogger.info("YouTube Video Detected: Using Google Colab GPU CLI (T4 Accelerator) on this device every time for video processing!")
-        mode = "2"
-    else:
-        print(f"\n{C_BOLD}Choose Processing & Quality Mode:{C_RESET}")
-        print(f"  {C_GREEN}[1]{C_RESET} {C_BOLD}Direct Download & Upload{C_RESET} {C_CYAN}(Recommended: Instant streamable MP4 in Termux, 100% reliable){C_RESET}")
-        print(f"  {C_YELLOW}[2]{C_RESET} {C_BOLD}Google Colab GPU{C_RESET} {C_GRAY}(Cloud GPU Transcode via colabcli on this device){C_RESET}\n")
+    print(f"\n{C_BOLD}Choose Processing & Quality Mode:{C_RESET}")
+    print(f"  {C_GREEN}[1]{C_RESET} {C_BOLD}Direct Download & Upload{C_RESET} {C_CYAN}(Recommended: Instant streamable MP4 in Termux, ~15-30s, zero transcoding){C_RESET}")
+    print(f"  {C_YELLOW}[2]{C_RESET} {C_BOLD}Google Colab GPU Transcode{C_RESET} {C_GRAY}(8-tier HLS adaptive package 144p to 4K, takes ~5-8m){C_RESET}\n")
 
-        mode = safe_input(f"{C_YELLOW}Select mode [1/2] (Default: [1] Direct Download): {C_RESET}")
-        if not mode or mode.strip() == "1":
-            mode = "1"
-        else:
-            mode = "2"
+    mode = safe_input(f"{C_YELLOW}Select mode [1/2] (Default: [1] Direct Download): {C_RESET}")
+    if not mode or mode.strip() == "1":
+        mode = "1"
+    else:
+        mode = "2"
 
     if mode == "2":
         # Processed on this device via Google Colab GPU CLI
@@ -1133,6 +1129,7 @@ def handle_long_pipeline(meta: dict, url: str):
 
     dl_cmd = [
         "yt-dlp",
+        "--extractor-args", "youtube:player_client=visionos,android",
         "-f", "bestvideo+bestaudio/best",
         "--merge-output-format", "mp4",
         "-o", temp_file,
