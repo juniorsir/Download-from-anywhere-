@@ -48,11 +48,8 @@ def ensure_dependencies():
         subprocess.run(["apt-get", "update", "-qq"], check=False)
         subprocess.run(["apt-get", "install", "-y", "-qq"] + packages_to_install, check=True)
 
-    try:
-        subprocess.run([sys.executable, "-m", "yt_dlp", "--version"], check=True, capture_output=True)
-    except Exception:
-        print(">>> Installing yt-dlp...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "yt-dlp"], check=True)
+    print(">>> Upgrading yt-dlp and requests to latest versions...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-U", "-q", "yt-dlp", "requests"], check=True)
 
 
 def check_gpu_nvenc():
@@ -65,7 +62,8 @@ def check_gpu_nvenc():
 
 
 def run_ffmpeg_with_progress(cmd, label):
-    """Executes FFmpeg with real-time stderr progress streaming."""
+    """Executes FFmpeg with real-time progress streaming."""
+    import time
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
@@ -75,6 +73,7 @@ def run_ffmpeg_with_progress(cmd, label):
     )
     buf = ""
     error_lines = []
+    last_print_time = time.time()
     while True:
         ch = proc.stderr.read(1)
         if not ch and proc.poll() is not None:
@@ -83,8 +82,11 @@ def run_ffmpeg_with_progress(cmd, label):
             line = buf.strip()
             if line:
                 if "frame=" in line or "time=" in line or "fps=" in line:
-                    sys.stdout.write(f"\r  [{label}] {line[:80]}")
-                    sys.stdout.flush()
+                    now = time.time()
+                    if now - last_print_time >= 2.0:
+                        sys.stdout.write(f"  [{label}] {line}\n")
+                        sys.stdout.flush()
+                        last_print_time = now
                 else:
                     error_lines.append(line)
             buf = ""
@@ -92,7 +94,6 @@ def run_ffmpeg_with_progress(cmd, label):
             buf += ch
 
     proc.wait()
-    sys.stdout.write("\n")
     sys.stdout.flush()
     return proc.returncode, "\n".join(error_lines[-10:])
 
@@ -101,8 +102,8 @@ def probe_metadata(url, default_author=""):
     print(">>> Probing video metadata...")
     commands = [
         [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node", "--remote-components", "ejs:github", "--dump-single-json", "--no-download", url],
-        [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node", "--remote-components", "ejs:github", "--dump-single-json", "--no-download", "--extractor-args", "youtube:player_client=ios,android,web", url],
-        [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node", "--remote-components", "ejs:github", "--dump-single-json", "--no-download", "--extractor-args", "youtube:player_client=mweb,web", url]
+        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=android", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--dump-single-json", "--no-download", url]
     ]
     last_err = ""
     for cmd in commands:
@@ -126,18 +127,11 @@ def download_source_video(url, output_path):
             sys.executable, "-m", "yt_dlp",
             "--js-runtimes", "node",
             "--remote-components", "ejs:github",
-            "-f", "bestvideo+bestaudio/best",
-            "--format-sort", "res,fps,br",
+            "-f", "bestvideo[protocol^=http]+bestaudio[protocol^=http]/bestvideo+bestaudio/best",
+            "--format-sort", "res,fps,proto:https",
             "--merge-output-format", "mp4",
-            "-o", output_path,
-            url
-        ],
-        [
-            sys.executable, "-m", "yt_dlp",
-            "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
-            "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
-            "--merge-output-format", "mp4",
+            "--newline",
+            "--progress",
             "-o", output_path,
             url
         ],
@@ -146,8 +140,29 @@ def download_source_video(url, output_path):
             "--js-runtimes", "node",
             "--remote-components", "ejs:github",
             "-f", "bestvideo+bestaudio/best",
-            "--extractor-args", "youtube:player_client=ios,android,web",
+            "--format-sort", "res,fps,br",
             "--merge-output-format", "mp4",
+            "--newline",
+            "--progress",
+            "-o", output_path,
+            url
+        ],
+        [
+            sys.executable, "-m", "yt_dlp",
+            "--extractor-args", "youtube:player_client=android",
+            "-f", "bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
+            "--newline",
+            "--progress",
+            "-o", output_path,
+            url
+        ],
+        [
+            sys.executable, "-m", "yt_dlp",
+            "-f", "bestvideo+bestaudio/best",
+            "--merge-output-format", "mp4",
+            "--newline",
+            "--progress",
             "-o", output_path,
             url
         ]
@@ -158,6 +173,8 @@ def download_source_video(url, output_path):
         if res.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             print(f">>> Download succeeded on attempt {idx} (Size: {os.path.getsize(output_path) / (1024*1024):.1f} MB)")
             return True
+        else:
+            print(f">>> Download attempt {idx} did not complete. Trying next method...")
 
     return False
 
@@ -367,43 +384,71 @@ def main():
         print(f">>> {progress_text}")
         notify_server_progress(args.server, args.api_key, args.file_code, progress_text)
 
-        # High-Speed Optimization: Use base 1080p for tiers <= 720p to avoid re-decoding 4K AV1
-        input_file = source_file
-        if q["h"] <= 720 and base_1080p_file and os.path.exists(base_1080p_file):
-            input_file = base_1080p_file
-
         scale_filter = f"scale=w={q['w']}:h={q['h']}:force_original_aspect_ratio=decrease,pad={q['w']}:{q['h']}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
 
-        ffmpeg_cmd = [
-            "ffmpeg", "-y", "-i", input_file,
-            "-vf", scale_filter,
-            "-c:v", v_codec,
-            "-pix_fmt", "yuv420p",
-            "-b:v", q["bitrate"],
-            "-maxrate", q["maxrate"],
-            "-bufsize", q["buf"],
-            "-preset", preset,
-            "-c:a", "aac",
-            "-b:a", q["audio"],
-            "-ar", "44100",
-            "-f", "hls",
-            "-hls_time", "4",
-            "-hls_playlist_type", "vod",
-            "-hls_segment_filename", segment_pattern,
-            playlist_path
-        ]
-        rc, err = run_ffmpeg_with_progress(ffmpeg_cmd, q["name"])
-        if rc != 0:
-            print(f">>> GPU NVENC failed for {q['name']} (Code {rc}). Retrying with CPU libx264...")
-            fallback_cmd = [
-                "ffmpeg", "-y", "-i", input_file,
+        if q["name"] == "1080p" and base_1080p_file:
+            print(">>> Generating optimized 1080p master for rapid multi-tier downscaling...")
+            gen_base_cmd = [
+                "ffmpeg", "-y", "-i", source_file,
                 "-vf", scale_filter,
-                "-c:v", "libx264",
+                "-c:v", v_codec,
                 "-pix_fmt", "yuv420p",
-                "-preset", "veryfast",
+                "-preset", preset,
                 "-b:v", q["bitrate"],
                 "-maxrate", q["maxrate"],
                 "-bufsize", q["buf"],
+                "-c:a", "aac",
+                "-b:a", q["audio"],
+                "-ar", "44100",
+                base_1080p_file
+            ]
+            rc, err = run_ffmpeg_with_progress(gen_base_cmd, "1080p Master")
+            if rc != 0:
+                print(f">>> GPU NVENC 1080p base failed (Code {rc}). Retrying with CPU libx264...")
+                fb_gen_cmd = [
+                    "ffmpeg", "-y", "-i", source_file,
+                    "-vf", scale_filter,
+                    "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p",
+                    "-preset", "veryfast",
+                    "-b:v", q["bitrate"],
+                    "-maxrate", q["maxrate"],
+                    "-bufsize", q["buf"],
+                    "-c:a", "aac",
+                    "-b:a", q["audio"],
+                    "-ar", "44100",
+                    base_1080p_file
+                ]
+                fb_rc, fb_err = run_ffmpeg_with_progress(fb_gen_cmd, "1080p Master (CPU)")
+                if fb_rc != 0:
+                    raise RuntimeError(f"FFmpeg failed to generate 1080p master: {fb_err}")
+
+            # Instant HLS segmentation using copy (takes ~1-2 seconds)
+            hls_pack_cmd = [
+                "ffmpeg", "-y", "-i", base_1080p_file,
+                "-c", "copy",
+                "-f", "hls",
+                "-hls_time", "4",
+                "-hls_playlist_type", "vod",
+                "-hls_segment_filename", segment_pattern,
+                playlist_path
+            ]
+            subprocess.run(hls_pack_cmd, check=True)
+        else:
+            # 2160p, 1440p (from source) or sub-HD <= 720p (from fast 1080p master)
+            input_file = source_file
+            if q["h"] <= 720 and base_1080p_file and os.path.exists(base_1080p_file):
+                input_file = base_1080p_file
+
+            ffmpeg_cmd = [
+                "ffmpeg", "-y", "-i", input_file,
+                "-vf", scale_filter,
+                "-c:v", v_codec,
+                "-pix_fmt", "yuv420p",
+                "-b:v", q["bitrate"],
+                "-maxrate", q["maxrate"],
+                "-bufsize", q["buf"],
+                "-preset", preset,
                 "-c:a", "aac",
                 "-b:a", q["audio"],
                 "-ar", "44100",
@@ -413,27 +458,31 @@ def main():
                 "-hls_segment_filename", segment_pattern,
                 playlist_path
             ]
-            fb_rc, fb_err = run_ffmpeg_with_progress(fallback_cmd, f"{q['name']} (CPU)")
-            if fb_rc != 0:
-                print(f"Error on {q['name']}: {fb_err[-400:]}")
-                raise RuntimeError(f"FFmpeg failed to transcode tier {q['name']}")
-
-        # If 1080p just completed, generate fast intermediate base for lower tiers
-        if q["name"] == "1080p" and base_1080p_file and not os.path.exists(base_1080p_file):
-            print(">>> Generating fast 1080p base for rapid sub-HD downscaling...")
-            gen_base_cmd = [
-                "ffmpeg", "-y", "-i", source_file,
-                "-vf", scale_filter,
-                "-c:v", v_codec,
-                "-pix_fmt", "yuv420p",
-                "-preset", preset,
-                "-b:v", q["bitrate"],
-                "-c:a", "aac",
-                "-b:a", q["audio"],
-                "-ar", "44100",
-                base_1080p_file
-            ]
-            subprocess.run(gen_base_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            rc, err = run_ffmpeg_with_progress(ffmpeg_cmd, q["name"])
+            if rc != 0:
+                print(f">>> GPU NVENC failed for {q['name']} (Code {rc}). Retrying with CPU libx264...")
+                fallback_cmd = [
+                    "ffmpeg", "-y", "-i", input_file,
+                    "-vf", scale_filter,
+                    "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p",
+                    "-preset", "veryfast",
+                    "-b:v", q["bitrate"],
+                    "-maxrate", q["maxrate"],
+                    "-bufsize", q["buf"],
+                    "-c:a", "aac",
+                    "-b:a", q["audio"],
+                    "-ar", "44100",
+                    "-f", "hls",
+                    "-hls_time", "4",
+                    "-hls_playlist_type", "vod",
+                    "-hls_segment_filename", segment_pattern,
+                    playlist_path
+                ]
+                fb_rc, fb_err = run_ffmpeg_with_progress(fallback_cmd, f"{q['name']} (CPU)")
+                if fb_rc != 0:
+                    print(f"Error on {q['name']}: {fb_err[-400:]}")
+                    raise RuntimeError(f"FFmpeg failed to transcode tier {q['name']}")
 
         bandwidth = int(q["bitrate"].replace("k", "")) * 1000 + int(q["audio"].replace("k", "")) * 1000
         master_content.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={q["w"]}x{q["h"]},NAME="{q["name"]}"')
