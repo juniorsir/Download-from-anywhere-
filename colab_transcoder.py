@@ -285,7 +285,9 @@ def main():
             "username": uploader,
             "platform": "youtube",
             "title": title,
-            "caption": description[:1500] if description else title
+            "caption": description[:1500] if description else title,
+            "duration": duration,
+            "source_url": args.url
         }
         files = {}
         with open(short_out, "rb") as sf:

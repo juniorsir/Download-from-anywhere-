@@ -22,6 +22,7 @@ import json
 import shutil
 import subprocess
 import datetime
+import urllib.parse
 from typing import Optional, Tuple, List, Dict, Any
 import requests
 
@@ -572,6 +573,105 @@ def prompt_on_error(error_msg: str, allow_retry: bool = True) -> str:
             return "exit"
 
 
+def normalize_canonical_url(url: Optional[str]) -> Optional[str]:
+    """Extracts canonical form of URLs to detect duplicates regardless of tracking parameters."""
+    if not url:
+        return None
+    url = url.strip()
+    if not url or url.lower() in ("app_direct_upload", "direct_upload", "unknown", "none"):
+        return None
+    yt_match = re.search(r'(?:v=|youtu\.be/|/embed/|/shorts/|/v/|/live/|^)([A-Za-z0-9_-]{11})(?:[&/?#]|$)', url)
+    if "youtube" in url.lower() or "youtu.be" in url.lower():
+        if yt_match:
+            return f"https://youtu.be/{yt_match.group(1)}"
+    ig_match = re.search(r'instagram\.com/(?:reel|reels|p|tv)/([A-Za-z0-9_-]+)', url, re.I)
+    if ig_match:
+        return f"https://www.instagram.com/reel/{ig_match.group(1)}/"
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if not parsed.netloc:
+            return None
+        return urllib.parse.urlunparse((parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip('/'), '', '', ''))
+    except Exception:
+        return url
+
+
+def clean_title_compare(title: Optional[str]) -> str:
+    """Normalizes title for duplicate comparison."""
+    if not title:
+        return ""
+    t = re.sub(r'[^\w\s]', '', title.lower())
+    return " ".join(t.split())
+
+
+def check_existing_vault_media(url: str, meta: Optional[dict] = None) -> Optional[dict]:
+    """
+    Queries Akash Media Vault to check if the target media is already published.
+    Matches by canonical URL or (cleaned title + duration within 3 seconds).
+    Returns the existing item dict if found, or None.
+    """
+    norm_input = normalize_canonical_url(url)
+    target_title = None
+    target_duration = 0.0
+
+    if meta:
+        target_title = clean_title_compare(meta.get("title"))
+        target_duration = float(meta.get("duration") or 0.0)
+
+    try:
+        r = requests.get(f"{SERVER_BASE_URL}{ROUTE_LIST}?type=all&limit=100", headers=HEADERS_RETRIEVE, timeout=8)
+        if r.status_code == 200:
+            items = r.json().get("items", [])
+            for item in items:
+                # 1. Check raw source_url match
+                item_source = item.get("source_url") or ""
+                if item_source and url.strip() == item_source.strip():
+                    return item
+
+                # 2. Check canonical URL match
+                if norm_input and item_source:
+                    item_norm = normalize_canonical_url(item_source)
+                    if item_norm and item_norm == norm_input:
+                        return item
+
+                # 3. Check title and duration match
+                if target_title and len(target_title) > 3:
+                    item_c_title = clean_title_compare(item.get("title"))
+                    if item_c_title == target_title:
+                        item_dur = float(item.get("duration") or 0.0)
+                        if target_duration <= 0 or item_dur <= 0 or abs(target_duration - item_dur) <= 3.0:
+                            return item
+    except Exception as e:
+        PipelineLogger.warn(f"Duplicate vault pre-check skipped due to network timeout: {e}")
+
+    return None
+
+
+def print_existing_vault_media(existing: dict):
+    """Displays standard banner and stream link for an already vaulted media item."""
+    title = existing.get("title") or "Untitled Media"
+    author = existing.get("author") or "Vault Media"
+    dur_raw = float(existing.get("duration") or 0.0)
+    dur_str = f"{int(dur_raw//60)}m {int(dur_raw%60)}s" if dur_raw >= 60 else f"{dur_raw:.1f}s"
+    m_type = existing.get("media_type", "video").upper()
+    stream_url = existing.get("stream_url") or existing.get("playback", {}).get("full_stream_url") or f"{SERVER_BASE_URL}{ROUTE_STREAM}/{existing.get('file_code')}"
+    code = existing.get("file_code")
+
+    send_toast(f"Media already in vault: {title[:20]}")
+    PipelineLogger.success("DUPLICATE DETECTED: MEDIA ALREADY IN AKASH VAULT!")
+
+    print(f"\n{C_CYAN}╔════════════════════════════════════════════════════════════╗{C_RESET}")
+    print(f"{C_CYAN}║     VIDEO ALREADY EXISTS IN AKASH SOVEREIGN VAULT!         ║{C_RESET}")
+    print(f"{C_CYAN}╚════════════════════════════════════════════════════════════╝{C_RESET}")
+    print(f"{C_BOLD} Title:{C_RESET}       {C_WHITE}{title}{C_RESET}")
+    print(f"{C_BOLD} Author:{C_RESET}      {C_YELLOW}{author}{C_RESET}")
+    print(f"{C_BOLD} Duration:{C_RESET}    {dur_str}")
+    print(f"{C_BOLD} Vault Code:{C_RESET}  {code}")
+    print(f"{C_BOLD} Type:{C_RESET}        {m_type}")
+    print(f"{C_BOLD} Stream URL:{C_RESET}  {C_GREEN}{stream_url}{C_RESET}")
+    print(f"{C_GRAY} Preserved existing file - zero duplicate storage created.{C_RESET}\n")
+
+
 def fetch_metadata(url: str) -> Optional[Tuple[dict, str]]:
     """
     Fetches video metadata using yt-dlp.
@@ -816,7 +916,8 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
         "author": username,
         "title": title,
         "caption": caption[:1500],
-        "is_short": "true"
+        "is_short": "true",
+        "source_url": url
     }
 
     uploaded = False
@@ -1049,7 +1150,8 @@ def handle_long_pipeline(meta: dict, url: str):
         "caption": auto_desc[:3000],
         "tags": auto_tags,
         "author": uploader,
-        "is_short": "false"
+        "is_short": "false",
+        "source_url": url
     }
 
     uploaded = False
@@ -1263,10 +1365,27 @@ def run_pipeline():
 
     while url:
         PipelineLogger.info(f"Target URL: {url}")
+
+        # 1. Early canonical URL deduplication check
+        existing_early = check_existing_vault_media(url)
+        if existing_early:
+            print_existing_vault_media(existing_early)
+            choice = safe_input(f"{C_YELLOW}Media already in vault. Force re-process/re-upload? (y/N): {C_RESET}").strip().lower()
+            if choice not in ("y", "yes"):
+                return
+
         meta_res = fetch_metadata(url)
         if not meta_res:
             return
         meta, active_url = meta_res
+
+        # 2. Comprehensive metadata deduplication check (title + duration match)
+        existing_meta = check_existing_vault_media(active_url, meta=meta)
+        if existing_meta:
+            print_existing_vault_media(existing_meta)
+            choice = safe_input(f"{C_YELLOW}Media already in vault. Force re-process/re-upload? (y/N): {C_RESET}").strip().lower()
+            if choice not in ("y", "yes"):
+                return
 
         platform = detect_platform(active_url)
         is_short, reason = is_short_media(meta, active_url, platform)
