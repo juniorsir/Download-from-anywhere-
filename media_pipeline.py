@@ -1057,6 +1057,32 @@ def handle_long_pipeline(meta: dict, url: str):
             if not os.path.exists(colab_script):
                 colab_script = os.path.expanduser("~/colab_transcoder.py")
 
+            import secrets
+            transcode_file_code = f"v_{secrets.token_hex(4)}"
+
+            # Pre-register transcoding state on server so it appears in vault listings immediately
+            try:
+                target_res = "4K (2160p)" if int(meta.get("height") or 0) >= 2160 else "1080p"
+                requests.post(
+                    f"{SERVER_BASE_URL}/api/media/long/transcode-start",
+                    headers=HEADERS,
+                    data={
+                        "file_code": transcode_file_code,
+                        "profile_id": str(selected_profile_id),
+                        "title": title,
+                        "author": uploader,
+                        "duration": str(duration),
+                        "source_url": url,
+                        "tags": auto_tags,
+                        "description": auto_desc[:3000],
+                        "target_resolution": target_res
+                    },
+                    timeout=10
+                )
+                PipelineLogger.info(f"Registered video in vault catalog: '{title[:40]}' [Status: Transcoding]")
+            except Exception as e:
+                PipelineLogger.warn(f"Failed to pre-register transcoding status on server: {e}")
+
             cmd = [
                 "colab", "run",
                 "--gpu", "T4",
@@ -1068,9 +1094,10 @@ def handle_long_pipeline(meta: dict, url: str):
                 "--profile-id", str(selected_profile_id),
                 "--profile-name", selected_profile_name,
                 "--author", uploader,
-                "--tags", auto_tags
+                "--tags", auto_tags,
+                "--file-code", transcode_file_code
             ]
-            PipelineLogger.info(f"Executing Colab GPU Full-Spectrum Transcode on this device...")
+            PipelineLogger.info("Executing Colab GPU Full-Spectrum Transcode on this device...")
             try:
                 ret = subprocess.run(cmd)
                 if ret.returncode == 0:
@@ -1083,13 +1110,21 @@ def handle_long_pipeline(meta: dict, url: str):
                     print(f"{C_BOLD}Task:{C_RESET}        Multi-bitrate HLS adaptive package (144p to 4K 2160p)")
                     print(f"{C_BOLD}Profile:{C_RESET}     {selected_profile_name}")
                     print(f"{C_BOLD}Author:{C_RESET}      {uploader}")
-                    print(f"{C_BOLD}Long Feed:{C_RESET}   {SERVER_BASE_URL}{ROUTE_LONG_FEED}")
+                    print(f"{C_BOLD}Watch / Feed:{C_RESET} {SERVER_BASE_URL}{ROUTE_LONG_FEED}")
                     print(f"{C_GRAY}Logs saved to: {LOG_FILE}{C_RESET}\n")
                     return
                 else:
-                    PipelineLogger.warn(f"Colab run exited with code {ret.returncode}. Falling back to direct download...")
+                    PipelineLogger.warn(f"Colab run exited with code {ret.returncode}. Canceling pending transcode status...")
+                    try:
+                        requests.post(f"{SERVER_BASE_URL}/api/media/long/transcode-cancel", headers=HEADERS, data={"file_code": transcode_file_code}, timeout=5)
+                    except Exception:
+                        pass
             except Exception as e:
-                PipelineLogger.warn(f"Colab execution error: {e}. Falling back to direct download...")
+                PipelineLogger.warn(f"Colab execution error: {e}. Canceling pending transcode status...")
+                try:
+                    requests.post(f"{SERVER_BASE_URL}/api/media/long/transcode-cancel", headers=HEADERS, data={"file_code": transcode_file_code}, timeout=5)
+                except Exception:
+                    pass
 
     # Fallback / Direct Mode: Download and upload with Live Logs
     temp_dir = "/data/data/com.termux/files/usr/tmp/akash_media"
@@ -1253,8 +1288,15 @@ def show_uploaded_media(filter_type: str = "all"):
                 dur = f"{int(dur_raw//60)}m {int(dur_raw%60)}s"
                 views = v.get('views', 0)
                 stream_url = v.get('stream_url') or v.get('playback', {}).get('full_stream_url') or f"{SERVER_BASE_URL}{ROUTE_STREAM}/{v['file_code']}"
-                print(f"  {C_YELLOW}*{C_RESET} {C_BOLD}{title:<42}{C_RESET} {C_GREEN}{profile:<14}{C_RESET} {C_GRAY}{author:<22} {dur:<8}{C_RESET}")
-                print(f"    {C_YELLOW} Stream:{C_RESET} {stream_url}\n")
+                v_status = v.get('status') or 'ready'
+                v_progress = v.get('progress') or ''
+
+                if v_status == "transcoding":
+                    print(f"  {C_MAGENTA}*{C_RESET} {C_BOLD}{title:<42}{C_RESET} {C_YELLOW}[Transcoding]{C_RESET} {C_GRAY}{author:<22} {dur:<8}{C_RESET}")
+                    print(f"    {C_CYAN} Status:{C_RESET} {v_progress or 'In progress on Google Colab GPU (4K Multi-Bitrate HLS)'}\n")
+                else:
+                    print(f"  {C_YELLOW}*{C_RESET} {C_BOLD}{title:<42}{C_RESET} {C_GREEN}{profile:<14}{C_RESET} {C_GRAY}{author:<22} {dur:<8}{C_RESET}")
+                    print(f"    {C_YELLOW} Stream:{C_RESET} {stream_url}\n")
 
     print(f"{C_CYAN} Global Web Portals:{C_RESET}")
     print(f"   Continuous Media Vault & Player: {C_BOLD}{SERVER_BASE_URL}{ROUTE_FEED}{C_RESET}\n")

@@ -178,6 +178,21 @@ def probe_video_height(video_file, fallback_h=1080):
     return fallback_h
 
 
+def notify_server_progress(server_url, api_key, file_code, progress_msg):
+    if not file_code:
+        return
+    try:
+        import requests
+        requests.post(
+            f"{server_url.rstrip('/')}/api/media/long/transcode-progress",
+            headers={"x-api-key": api_key},
+            data={"file_code": file_code, "progress": progress_msg},
+            timeout=5
+        )
+    except Exception:
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(description="Akash Colab GPU Video Transcoder")
     parser.add_argument("--url", required=True, help="Video source URL")
@@ -188,6 +203,7 @@ def main():
     parser.add_argument("--author", default="", help="Original Author / Channel")
     parser.add_argument("--tags", default="", help="Metadata tags")
     parser.add_argument("--is-short", action="store_true", help="Process as vertical Short Reel instead of HLS package")
+    parser.add_argument("--file-code", default="", help="Pre-registered Vault File Code")
     args = parser.parse_args()
 
     ensure_dependencies()
@@ -244,7 +260,7 @@ def main():
 
     use_nvenc = check_gpu_nvenc()
     v_codec = "h264_nvenc" if use_nvenc else "libx264"
-    preset = "p4" if use_nvenc else "veryfast"
+    preset = "p1" if use_nvenc else "veryfast"
     print(f">>> Selected FFmpeg Video Codec: {v_codec} (GPU NVENC: {use_nvenc})")
 
     # If processed as a Short / Reel
@@ -337,17 +353,29 @@ def main():
 
     master_content = ["#EXTM3U", "#EXT-X-VERSION:3"]
 
-    for q in qualities:
+    base_1080p_file = None
+    if source_h > 1080:
+        base_1080p_file = os.path.join(work_dir, "base_1080p.mp4")
+
+    for idx, q in enumerate(qualities, 1):
         q_dir = os.path.join(hls_dir, q["name"])
         os.makedirs(q_dir, exist_ok=True)
         playlist_path = os.path.join(q_dir, "prog.m3u8")
         segment_pattern = os.path.join(q_dir, "seg_%03d.ts")
 
-        print(f">>> Transcoding {q['name']} stream...")
+        progress_text = f"Transcoding {q['name']} stream ({idx}/{len(qualities)})..."
+        print(f">>> {progress_text}")
+        notify_server_progress(args.server, args.api_key, args.file_code, progress_text)
+
+        # High-Speed Optimization: Use base 1080p for tiers <= 720p to avoid re-decoding 4K AV1
+        input_file = source_file
+        if q["h"] <= 720 and base_1080p_file and os.path.exists(base_1080p_file):
+            input_file = base_1080p_file
+
         scale_filter = f"scale=w={q['w']}:h={q['h']}:force_original_aspect_ratio=decrease,pad={q['w']}:{q['h']}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
 
         ffmpeg_cmd = [
-            "ffmpeg", "-y", "-i", source_file,
+            "ffmpeg", "-y", "-i", input_file,
             "-vf", scale_filter,
             "-c:v", v_codec,
             "-pix_fmt", "yuv420p",
@@ -368,7 +396,7 @@ def main():
         if rc != 0:
             print(f">>> GPU NVENC failed for {q['name']} (Code {rc}). Retrying with CPU libx264...")
             fallback_cmd = [
-                "ffmpeg", "-y", "-i", source_file,
+                "ffmpeg", "-y", "-i", input_file,
                 "-vf", scale_filter,
                 "-c:v", "libx264",
                 "-pix_fmt", "yuv420p",
@@ -390,6 +418,23 @@ def main():
                 print(f"Error on {q['name']}: {fb_err[-400:]}")
                 raise RuntimeError(f"FFmpeg failed to transcode tier {q['name']}")
 
+        # If 1080p just completed, generate fast intermediate base for lower tiers
+        if q["name"] == "1080p" and base_1080p_file and not os.path.exists(base_1080p_file):
+            print(">>> Generating fast 1080p base for rapid sub-HD downscaling...")
+            gen_base_cmd = [
+                "ffmpeg", "-y", "-i", source_file,
+                "-vf", scale_filter,
+                "-c:v", v_codec,
+                "-pix_fmt", "yuv420p",
+                "-preset", preset,
+                "-b:v", q["bitrate"],
+                "-c:a", "aac",
+                "-b:a", q["audio"],
+                "-ar", "44100",
+                base_1080p_file
+            ]
+            subprocess.run(gen_base_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         bandwidth = int(q["bitrate"].replace("k", "")) * 1000 + int(q["audio"].replace("k", "")) * 1000
         master_content.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={q["w"]}x{q["h"]},NAME="{q["name"]}"')
         master_content.append(f'{q["name"]}/prog.m3u8')
@@ -401,10 +446,11 @@ def main():
 
     print(">>> Multi-bitrate HLS package created successfully!")
 
-    # 5. Compress HLS package to ZIP
-    print(">>> Compressing HLS package...")
+    # 5. Compress HLS package to ZIP (using fast ZIP_STORED)
+    notify_server_progress(args.server, args.api_key, args.file_code, "Packaging multi-bitrate HLS bundle...")
+    print(">>> Packaging HLS bundle (fast archive mode)...")
     zip_path = os.path.join(work_dir, "hls_bundle.zip")
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_STORED) as zf:
         for root, dirs, files in os.walk(hls_dir):
             for file in files:
                 abs_path = os.path.join(root, file)
@@ -412,6 +458,7 @@ def main():
                 zf.write(abs_path, rel_path)
 
     # 6. Upload bundle to Akash Server
+    notify_server_progress(args.server, args.api_key, args.file_code, "Uploading HLS package to Akash Vault...")
     print(">>> Uploading HLS bundle to Akash Server...")
     upload_url = f"{args.server.rstrip('/')}/api/media/long/upload"
 
@@ -427,7 +474,8 @@ def main():
         "duration": duration,
         "available_qualities": available_qualities_str,
         "source_url": args.url,
-        "is_hls_package": "true"
+        "is_hls_package": "true",
+        "file_code": args.file_code
     }
 
     files = {}
