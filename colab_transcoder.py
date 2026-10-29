@@ -101,8 +101,9 @@ def run_ffmpeg_with_progress(cmd, label):
 def probe_metadata(url, default_author=""):
     print(">>> Probing video metadata...")
     commands = [
-        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=tv_embedded", "--dump-single-json", "--no-download", url],
-        [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node", "--remote-components", "ejs:github", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=visionos,android", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=visionos", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=android", "--dump-single-json", "--no-download", url],
         [sys.executable, "-m", "yt_dlp", "--dump-single-json", "--no-download", url]
     ]
     last_err = ""
@@ -125,7 +126,7 @@ def download_source_video(url, output_path):
     commands = [
         [
             sys.executable, "-m", "yt_dlp",
-            "--extractor-args", "youtube:player_client=tv_embedded",
+            "--extractor-args", "youtube:player_client=visionos,android",
             "-f", "bestvideo[protocol^=http]+bestaudio[protocol^=http]/bestvideo+bestaudio/best",
             "--format-sort", "res,fps,proto:https",
             "--merge-output-format", "mp4",
@@ -136,8 +137,9 @@ def download_source_video(url, output_path):
         ],
         [
             sys.executable, "-m", "yt_dlp",
-            "--extractor-args", "youtube:player_client=tv_embedded",
+            "--extractor-args", "youtube:player_client=visionos",
             "-f", "bestvideo+bestaudio/best",
+            "--format-sort", "res,fps,proto:https",
             "--merge-output-format", "mp4",
             "--newline",
             "--progress",
@@ -146,10 +148,8 @@ def download_source_video(url, output_path):
         ],
         [
             sys.executable, "-m", "yt_dlp",
-            "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
-            "-f", "bestvideo[protocol^=http]+bestaudio[protocol^=http]/bestvideo+bestaudio/best",
-            "--format-sort", "res,fps,proto:https",
+            "--extractor-args", "youtube:player_client=android",
+            "-f", "bestvideo+bestaudio/best",
             "--merge-output-format", "mp4",
             "--newline",
             "--progress",
