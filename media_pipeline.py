@@ -174,6 +174,102 @@ class PipelineLogger:
         return process.returncode
 
 
+# ─── Cookie & Session Management Engine ───────────────────────────────────────
+
+def get_cookie_file_path() -> Optional[str]:
+    """Finds or auto-generates a Netscape cookies file for Instagram / YouTube."""
+    akash_dir = os.path.expanduser("~/.config/akash")
+    os.makedirs(akash_dir, exist_ok=True)
+
+    # 1. Direct environment variable
+    custom_path = os.getenv("AKASH_COOKIES_FILE") or os.getenv("INSTAGRAM_COOKIES_FILE")
+    if custom_path and os.path.exists(custom_path) and os.path.getsize(custom_path) > 10:
+        return custom_path
+
+    # 2. Check standard cookie paths
+    cand_paths = [
+        os.path.join(akash_dir, "instagram_cookies.txt"),
+        os.path.join(akash_dir, "cookies.txt"),
+        os.path.expanduser("~/.instagram_cookies.txt"),
+        os.path.expanduser("~/cookies.txt"),
+        os.path.expanduser("~/.cookies.txt")
+    ]
+    for p in cand_paths:
+        if os.path.exists(p) and os.path.getsize(p) > 10:
+            return p
+
+    # 3. Check for raw session ID file or env var to auto-generate Netscape cookies
+    session_id = os.getenv("INSTAGRAM_SESSIONID")
+    session_file = os.path.join(akash_dir, "instagram_session.txt")
+    if not session_id and os.path.exists(session_file):
+        try:
+            with open(session_file, "r", encoding="utf-8") as sf:
+                session_id = sf.read().strip()
+        except Exception:
+            pass
+
+    if session_id:
+        target_cookie_file = os.path.join(akash_dir, "instagram_cookies.txt")
+        try:
+            with open(target_cookie_file, "w", encoding="utf-8") as cf:
+                cf.write("# Netscape HTTP Cookie File\n")
+                cf.write(f".instagram.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\t{session_id}\n")
+            return target_cookie_file
+        except Exception:
+            pass
+
+    return None
+
+
+def get_yt_dlp_cookie_args() -> List[str]:
+    """Returns --cookies flag if a valid cookie file exists."""
+    c_path = get_cookie_file_path()
+    if c_path and os.path.exists(c_path):
+        return ["--cookies", c_path]
+    return []
+
+
+def set_instagram_session(session_id: str) -> bool:
+    """Saves Instagram sessionid and generates Netscape cookies file."""
+    clean_sid = session_id.strip()
+    if not clean_sid:
+        return False
+    akash_dir = os.path.expanduser("~/.config/akash")
+    os.makedirs(akash_dir, exist_ok=True)
+    session_file = os.path.join(akash_dir, "instagram_session.txt")
+    cookie_file = os.path.join(akash_dir, "instagram_cookies.txt")
+    try:
+        with open(session_file, "w", encoding="utf-8") as sf:
+            sf.write(clean_sid)
+        with open(cookie_file, "w", encoding="utf-8") as cf:
+            cf.write("# Netscape HTTP Cookie File\n")
+            cf.write(f".instagram.com\tTRUE\t/\tTRUE\t2147483647\tsessionid\t{clean_sid}\n")
+        PipelineLogger.success("Instagram session saved successfully! Authenticated ingestion enabled.")
+        send_toast("Instagram session configured successfully")
+        return True
+    except Exception as e:
+        PipelineLogger.error(f"Failed to save Instagram session: {e}")
+        return False
+
+
+def set_cookies_file(source_path: str) -> bool:
+    """Copies a cookies.txt file into the Akash configuration directory."""
+    if not os.path.exists(source_path):
+        PipelineLogger.error(f"Cookie file not found: {source_path}")
+        return False
+    akash_dir = os.path.expanduser("~/.config/akash")
+    os.makedirs(akash_dir, exist_ok=True)
+    dest_path = os.path.join(akash_dir, "instagram_cookies.txt")
+    try:
+        shutil.copy2(source_path, dest_path)
+        PipelineLogger.success(f"Cookies saved to {dest_path}! Authenticated ingestion enabled.")
+        send_toast("Instagram cookies configured successfully")
+        return True
+    except Exception as e:
+        PipelineLogger.error(f"Failed to copy cookies: {e}")
+        return False
+
+
 def print_banner():
     banner = f"""
 {C_CYAN}╔════════════════════════════════════════════════════════════╗
@@ -946,9 +1042,10 @@ def fetch_metadata(url: str) -> Optional[Tuple[dict, str]]:
     Returns (meta_dict, final_url) or None if cancelled.
     """
     current_url = url
+    cookie_args = get_yt_dlp_cookie_args()
     while True:
         PipelineLogger.info(f"{C_YELLOW}> Analyzing media source and extracting metadata...{C_RESET}")
-        cmd = ["yt-dlp", "--write-comments", "--dump-single-json", "--no-download", current_url]
+        cmd = ["yt-dlp", "--write-comments", "--dump-single-json", "--no-download"] + cookie_args + [current_url]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0:
             try:
@@ -971,6 +1068,18 @@ def fetch_metadata(url: str) -> Optional[Tuple[dict, str]]:
             if fallback_meta:
                 PipelineLogger.success(f"Resilient Metadata Extracted: '{fallback_meta.get('title', 'Unknown')[:50]}'")
                 return fallback_meta, current_url
+
+            # Detect login required or empty response
+            if any(k in err_text.lower() for k in ["empty media response", "not granting access", "restricted", "available to everyone", "login"]):
+                print(f"\n{C_YELLOW}╔════════════════════════════════════════════════════════════╗{C_RESET}")
+                print(f"{C_YELLOW}║         INSTAGRAM AUTHENTICATION REQUIRED                  ║{C_RESET}")
+                print(f"{C_YELLOW}╚════════════════════════════════════════════════════════════╝{C_RESET}")
+                print("This Instagram Reel or Post is restricted to logged-in accounts.")
+                print("(Private account, age-gated, or sensitive content).")
+                print(f"\nTo download restricted Instagram content, save your session once:")
+                print(f"  {C_GREEN}python3 media_pipeline.py --set-instagram-session <sessionid>{C_RESET}")
+                print(f"  or copy cookies.txt to: {C_CYAN}~/.config/akash/instagram_cookies.txt{C_RESET}\n")
+                send_toast("Instagram login required for this post")
 
         action = prompt_on_error(f"Failed to fetch video metadata: {err_text}")
         if action == "retry":
@@ -1212,10 +1321,12 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
                 prompt_on_error("Failed to synthesize short video from image post.", allow_retry=False)
                 return
         else:
+            cookie_args = get_yt_dlp_cookie_args()
             dl_cmd = [
                 "yt-dlp",
                 "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                "--merge-output-format", "mp4",
+                "--merge-output-format", "mp4"
+            ] + cookie_args + [
                 "-o", temp_file,
                 url
             ]
@@ -1254,7 +1365,7 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
 
                 action = prompt_on_error("Download failed or output file is empty.")
                 if action == "retry":
-                    dl_cmd = ["yt-dlp", "-f", "best", "-o", temp_file, url]
+                    dl_cmd = ["yt-dlp", "-f", "best"] + cookie_args + ["-o", temp_file, url]
                     continue
                 else:
                     return
@@ -1499,11 +1610,13 @@ def handle_long_pipeline(meta: dict, url: str):
     os.makedirs(temp_dir, exist_ok=True)
     temp_file = os.path.join(temp_dir, "long_video.mp4")
 
+    cookie_args = get_yt_dlp_cookie_args()
     dl_cmd = [
         "yt-dlp",
         "--extractor-args", "youtube:player_client=visionos,android",
         "-f", "bestvideo+bestaudio/best",
-        "--merge-output-format", "mp4",
+        "--merge-output-format", "mp4"
+    ] + cookie_args + [
         "-o", temp_file,
         url
     ]
@@ -1533,7 +1646,7 @@ def handle_long_pipeline(meta: dict, url: str):
 
             action = prompt_on_error("Download failed or output file is empty.")
             if action == "retry":
-                dl_cmd = ["yt-dlp", "-f", "best", "-o", temp_file, url]
+                dl_cmd = ["yt-dlp", "-f", "best"] + cookie_args + ["-o", temp_file, url]
                 continue
             else:
                 return
@@ -1759,6 +1872,22 @@ def run_pipeline():
         elif arg in ("--tail", "-f", "tail"):
             print(f"{C_CYAN}Streaming live logs from {LOG_FILE} (Ctrl+C to stop)...{C_RESET}")
             subprocess.run(["tail", "-f", LOG_FILE])
+            return
+        elif arg in ("--set-instagram-session", "--session"):
+            if len(sys.argv) > 2:
+                set_instagram_session(sys.argv[2])
+            else:
+                sid = safe_input("Paste Instagram sessionid cookie value: ")
+                if sid:
+                    set_instagram_session(sid)
+            return
+        elif arg in ("--set-cookies", "--cookies"):
+            if len(sys.argv) > 2:
+                set_cookies_file(sys.argv[2])
+            else:
+                cp = safe_input("Enter path to cookies.txt file: ")
+                if cp:
+                    set_cookies_file(cp)
             return
         url = arg
     else:
