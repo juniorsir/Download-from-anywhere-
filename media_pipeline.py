@@ -185,9 +185,9 @@ def print_banner():
 
 
 def send_toast(message: str):
-    """Triggers Android system toast notification if termux-api is available."""
+    """Triggers Android system toast notification if termux-api is available (with strict 2s timeout)."""
     try:
-        subprocess.run(["termux-toast", message], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["termux-toast", message], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
     except Exception:
         pass
 
@@ -235,14 +235,17 @@ def extract_clean_author_handle(meta: dict, platform: str) -> Tuple[str, str]:
     display_name = strip_emojis(raw_display.split("|")[0].split(" - ")[0].strip())
 
     if platform == "instagram":
-        # 1. Look for 'Video by <username>' in title
-        m = re.search(r'Video by ([a-zA-Z0-9._]+)', title, re.IGNORECASE)
+        # 1. Look for 'Video/Photo/Post by <username>' in title
+        m = re.search(r'(?:Video|Photo|Post)\s+by\s+([a-zA-Z0-9._]+)', title, re.IGNORECASE)
         if m:
             clean_handle = m.group(1).lower().strip()
-        # 2. Check uploader_id if clean alphanumeric
+        # 2. Look for '<username> on Instagram'
+        elif re.search(r'([a-zA-Z0-9._]+)\s+on\s+Instagram', title, re.IGNORECASE):
+            clean_handle = re.search(r'([a-zA-Z0-9._]+)\s+on\s+Instagram', title, re.IGNORECASE).group(1).lower().strip()
+        # 3. Check uploader_id if clean alphanumeric
         elif uploader_id and re.match(r'^[a-zA-Z0-9._]+$', uploader_id):
             clean_handle = uploader_id.lower().strip()
-        # 3. Check channel if clean alphanumeric
+        # 4. Check channel if clean alphanumeric
         elif channel and re.match(r'^[a-zA-Z0-9._]+$', channel):
             clean_handle = channel.lower().strip()
         else:
@@ -532,7 +535,7 @@ def prompt_on_error(error_msg: str, allow_retry: bool = True) -> str:
     PipelineLogger.error(error_msg)
     send_toast(f"Pipeline Error: {error_msg[:40]}")
 
-    is_interactive = sys.stdin.isatty() or os.path.exists("/dev/tty")
+    is_interactive = len(sys.argv) <= 1 and sys.stdin.isatty() and not bool(os.getenv("TERMUX_URL_OPENER_HANDLES_PAUSE"))
 
     print(f"\n{C_RED}╔════════════════════════════════════════════════════════════╗{C_RESET}")
     print(f"{C_RED}║                     AN ERROR OCCURRED                      ║{C_RESET}")
@@ -541,8 +544,7 @@ def prompt_on_error(error_msg: str, allow_retry: bool = True) -> str:
     print(f"{C_GRAY}Log file: {LOG_FILE}{C_RESET}\n")
 
     if not is_interactive:
-        print(f"{C_YELLOW}Non-interactive session. Pausing 5s before exit...{C_RESET}")
-        time.sleep(5)
+        print(f"{C_YELLOW}Automated or background session. Exiting cleanly...{C_RESET}")
         return "exit"
 
     while True:
@@ -599,10 +601,24 @@ def clean_title_compare(title: Optional[str]) -> str:
     return " ".join(t.split())
 
 
+def is_generic_title(title: Optional[str]) -> bool:
+    """Detects auto-generated non-unique fallback titles that should not be used for deduplication."""
+    if not title:
+        return True
+    t = title.strip().lower()
+    generic_prefixes = (
+        "video by ", "reel by ", "instagram post by ", "post by ",
+        "short by ", "untitled", "video from ", "audio by ", "reel ", "video "
+    )
+    if any(t.startswith(p) for p in generic_prefixes):
+        return True
+    return len(t) < 4
+
+
 def check_existing_vault_media(url: str, meta: Optional[dict] = None) -> Optional[dict]:
     """
     Queries Akash Media Vault to check if the target media is already published.
-    Matches by canonical URL or (cleaned title + duration within 3 seconds).
+    Matches by canonical URL or (cleaned title + duration within 1 second for distinct titles).
     Returns the existing item dict if found, or None.
     """
     norm_input = normalize_canonical_url(url)
@@ -618,24 +634,30 @@ def check_existing_vault_media(url: str, meta: Optional[dict] = None) -> Optiona
         if r.status_code == 200:
             items = r.json().get("items", [])
             for item in items:
-                # 1. Check raw source_url match
                 item_source = item.get("source_url") or ""
+
+                # 1. Check raw source_url match
                 if item_source and url.strip() == item_source.strip():
                     return item
 
                 # 2. Check canonical URL match
-                if norm_input and item_source:
-                    item_norm = normalize_canonical_url(item_source)
-                    if item_norm and item_norm == norm_input:
+                item_norm = normalize_canonical_url(item_source) if item_source else None
+                if norm_input and item_norm:
+                    if item_norm == norm_input:
                         return item
+                    # Both items have verified canonical platform IDs (e.g. distinct Instagram Reels).
+                    # Since they have different unique platform IDs, they are guaranteed to be different videos.
+                    continue
 
-                # 3. Check title and duration match
-                if target_title and len(target_title) > 3:
-                    item_c_title = clean_title_compare(item.get("title"))
-                    if item_c_title == target_title:
-                        item_dur = float(item.get("duration") or 0.0)
-                        if target_duration <= 0 or item_dur <= 0 or abs(target_duration - item_dur) <= 3.0:
-                            return item
+                # 3. Check title and duration match (STRICT: only for non-generic distinct titles)
+                if target_title and not is_generic_title(target_title) and len(target_title) > 5:
+                    raw_item_title = item.get("title") or ""
+                    if not is_generic_title(raw_item_title):
+                        item_c_title = clean_title_compare(raw_item_title)
+                        if item_c_title == target_title:
+                            item_dur = float(item.get("duration") or 0.0)
+                            if target_duration > 0 and item_dur > 0 and abs(target_duration - item_dur) <= 1.0:
+                                return item
     except Exception as e:
         PipelineLogger.warn(f"Duplicate vault pre-check skipped due to network timeout: {e}")
 
@@ -667,26 +689,288 @@ def print_existing_vault_media(existing: dict):
     print(f"{C_GRAY} Preserved existing file - zero duplicate storage created.{C_RESET}\n")
 
 
+# ─── Resilient Image & Social Media Ingestion Engine ──────────────────────────
+
+def extract_instagram_metadata_fallback(url: str) -> Optional[dict]:
+    """
+    Resilient Instagram metadata and media extractor using server-side prerendered bot headers.
+    Bypasses audience restriction walls, login redirects, and extracts high-resolution images,
+    creator handle, display name, and full caption for both image posts (/p/...) and reels (/reel/...).
+    """
+    clean_url = url.split("?")[0].rstrip("/")
+    shortcode_match = re.search(r'instagram\.com/(?:reel|p|tv)/([a-zA-Z0-9_\-]+)', url)
+    if not shortcode_match:
+        return None
+    shortcode = shortcode_match.group(1)
+
+    bot_headers = {
+        "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5"
+    }
+
+    try:
+        PipelineLogger.info(f"Querying Instagram Sovereign Resilient Scraper for [{shortcode}]...")
+        resp = requests.get(url, headers=bot_headers, timeout=12)
+        if resp.status_code != 200:
+            return None
+
+        html_text = resp.text
+
+        # Extract OpenGraph tags
+        og_img_match = re.search(r'property="og:image"\s+content="([^"]+)"', html_text) or re.search(r'content="([^"]+)"\s+property="og:image"', html_text)
+        og_title_match = re.search(r'property="og:title"\s+content="([^"]+)"', html_text) or re.search(r'content="([^"]+)"\s+property="og:title"', html_text)
+        og_desc_match = re.search(r'property="og:description"\s+content="([^"]+)"', html_text) or re.search(r'content="([^"]+)"\s+property="og:description"', html_text)
+        og_url_match = re.search(r'property="og:url"\s+content="([^"]+)"', html_text) or re.search(r'content="([^"]+)"\s+property="og:url"', html_text)
+        tw_title_match = re.search(r'name="twitter:title"\s+content="([^"]+)"', html_text) or re.search(r'content="([^"]+)"\s+name="twitter:title"', html_text)
+
+        raw_img = html.unescape(og_img_match.group(1)) if og_img_match else None
+        raw_title = html.unescape(og_title_match.group(1)) if og_title_match else ""
+        raw_desc = html.unescape(og_desc_match.group(1)) if og_desc_match else ""
+        raw_og_url = html.unescape(og_url_match.group(1)) if og_url_match else ""
+        raw_tw_title = html.unescape(tw_title_match.group(1)) if tw_title_match else ""
+
+        # Extract creator username
+        username = "instagram_creator"
+        if raw_og_url:
+            u_m = re.search(r'instagram\.com/([^/]+)/', raw_og_url)
+            if u_m and u_m.group(1) not in ('p', 'reel', 'tv', 'explore', 'stories'):
+                username = u_m.group(1)
+        if username == "instagram_creator" and raw_tw_title:
+            u_m = re.search(r'@([a-zA-Z0-9_\.]+)', raw_tw_title)
+            if u_m:
+                username = u_m.group(1)
+        if username == "instagram_creator" and raw_title:
+            u_m = re.search(r'([a-zA-Z0-9_\.]+)\s+on\s+Instagram', raw_title, re.IGNORECASE)
+            if u_m:
+                username = u_m.group(1)
+
+        # Extract display name
+        display_name = username
+        if raw_tw_title:
+            parts = raw_tw_title.split("(@")[0].strip()
+            if parts:
+                display_name = strip_emojis(parts).strip()
+        elif raw_title and " on Instagram" in raw_title:
+            display_name = strip_emojis(raw_title.split(" on Instagram")[0].strip())
+
+        clean_caption = strip_emojis(raw_desc).strip()
+        title_candidate = raw_title.replace("on Instagram:", "").strip()
+        if " • Instagram " in title_candidate:
+            title_candidate = title_candidate.split(" • Instagram ")[0].strip()
+
+        # Collect high-res images
+        image_urls = []
+        if raw_img and raw_img.startswith("http"):
+            image_urls.append(raw_img)
+
+        # Additional carousel images
+        pattern = re.compile(r'https://scontent[a-zA-Z0-9\.\_\-\/]+\.cdninstagram\.com/[^\s"\'<>]+')
+        for extra in pattern.findall(html_text):
+            u_clean = html.unescape(extra)
+            if ("/v/t" in u_clean or "dst-jpg" in u_clean) and u_clean not in image_urls:
+                image_urls.append(u_clean)
+
+        if not image_urls:
+            return None
+
+        return {
+            "id": shortcode,
+            "title": title_candidate or f"Post by @{username}",
+            "description": clean_caption,
+            "uploader": username,
+            "uploader_id": username,
+            "channel": display_name,
+            "creator": display_name,
+            "duration": 5.0 if len(image_urls) <= 1 else min(30.0, float(len(image_urls)) * 3.5),
+            "thumbnail": image_urls[0],
+            "thumbnails": [{"url": u} for u in image_urls],
+            "is_image": True,
+            "image_urls": image_urls,
+            "webpage_url": url,
+            "extractor": "InstagramFallback",
+            "extractor_key": "Instagram",
+            "formats": []
+        }
+    except Exception as e:
+        PipelineLogger.warn(f"Instagram fallback extraction error: {e}")
+        return None
+
+
+def download_file_direct(url: str, output_path: str, timeout: int = 25) -> bool:
+    """Downloads a file directly via resilient HTTP request."""
+    try:
+        headers = {
+            "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+        }
+        res = requests.get(url, headers=headers, timeout=timeout)
+        if res.status_code == 200 and len(res.content) > 100:
+            with open(output_path, "wb") as f:
+                f.write(res.content)
+            return True
+    except Exception as e:
+        PipelineLogger.warn(f"Direct media download failed: {e}")
+    return False
+
+
+def render_image_to_short(image_path: str, output_mp4: str, duration_sec: float = 5.0, audio_path: Optional[str] = None) -> bool:
+    """
+    Renders any image into a vertical 1080x1920 MP4 reel using 2-step ultra-fast compositing:
+    Step 1: Composites 1 single frame with blurred background (fills 1080x1920) and sharp centered foreground.
+    Step 2: Loops that 1 frame with ultrafast h264 encoder and FastStart moov atom at Byte 0.
+    """
+    try:
+        temp_dir = os.path.dirname(output_mp4)
+        comp_img = os.path.join(temp_dir, f"comp_{secrets.token_hex(4)}.png")
+
+        # Step 1: Composite 1 single frame (0.1s)
+        cmd_comp = [
+            "ffmpeg", "-y", "-i", image_path,
+            "-filter_complex",
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:5[bg];"
+            "[0:v]scale=1080:1920:force_original_aspect_ratio=decrease[fg];"
+            "[bg][fg]overlay=(W-w)/2:(H-h)/2",
+            "-vframes", "1",
+            comp_img
+        ]
+        subprocess.run(cmd_comp, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=12)
+
+        # Step 2: Loop to MP4
+        cmd_encode = [
+            "ffmpeg", "-y", "-loop", "1", "-framerate", "10", "-t", str(duration_sec),
+            "-i", comp_img
+        ]
+        if audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+            cmd_encode.extend(["-i", audio_path, "-c:a", "aac", "-shortest"])
+        cmd_encode.extend([
+            "-c:v", "libx264", "-preset", "ultrafast", "-tune", "stillimage",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            output_mp4
+        ])
+        subprocess.run(cmd_encode, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=25)
+
+        if os.path.exists(comp_img):
+            try: os.remove(comp_img)
+            except Exception: pass
+
+        return bool(os.path.exists(output_mp4) and os.path.getsize(output_mp4) > 1000)
+    except Exception as e:
+        PipelineLogger.error(f"Image-to-short rendering failed: {e}")
+        return False
+
+
+def render_carousel_to_short(image_paths: List[str], output_mp4: str, sec_per_slide: float = 3.5, audio_path: Optional[str] = None) -> bool:
+    """
+    Renders multiple carousel images into a unified slideshow short MP4.
+    """
+    if len(image_paths) == 1:
+        return render_image_to_short(image_paths[0], output_mp4, duration_sec=5.0, audio_path=audio_path)
+
+    temp_dir = os.path.dirname(output_mp4)
+    slide_videos = []
+    try:
+        for idx, img_p in enumerate(image_paths):
+            slide_out = os.path.join(temp_dir, f"slide_{idx}_{secrets.token_hex(4)}.mp4")
+            if render_image_to_short(img_p, slide_out, duration_sec=sec_per_slide):
+                slide_videos.append(slide_out)
+
+        if not slide_videos:
+            return False
+
+        concat_txt = os.path.join(temp_dir, f"concat_{secrets.token_hex(4)}.txt")
+        with open(concat_txt, "w") as f:
+            for sv in slide_videos:
+                f.write(f"file '{sv}'\n")
+
+        cmd = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_txt,
+            "-c", "copy", "-movflags", "+faststart", output_mp4
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=30)
+
+        for sv in slide_videos:
+            try: os.remove(sv)
+            except Exception: pass
+        try: os.remove(concat_txt)
+        except Exception: pass
+
+        return bool(os.path.exists(output_mp4) and os.path.getsize(output_mp4) > 1000)
+    except Exception as e:
+        PipelineLogger.error(f"Carousel-to-short rendering failed: {e}")
+        return False
+
+
+def synthesize_short_from_images(meta: dict, url: str, temp_dir: str, output_mp4: str) -> bool:
+    """
+    Downloads high-resolution images and converts them into a sovereign short video reel.
+    """
+    image_urls = meta.get("image_urls") or []
+    if not image_urls and meta.get("thumbnail"):
+        image_urls = [meta["thumbnail"]]
+    if not image_urls and meta.get("thumbnails"):
+        image_urls = [t["url"] for t in meta["thumbnails"] if t.get("url")]
+
+    if not image_urls:
+        PipelineLogger.warn("No image URLs found to synthesize short video.")
+        return False
+
+    downloaded_paths = []
+    PipelineLogger.info(f"Downloading {len(image_urls)} media image(s) for sovereign short synthesis...")
+    for idx, u in enumerate(image_urls[:8]):
+        img_dest = os.path.join(temp_dir, f"input_img_{idx}_{secrets.token_hex(3)}.jpg")
+        if download_file_direct(u, img_dest):
+            downloaded_paths.append(img_dest)
+
+    if not downloaded_paths:
+        PipelineLogger.error("Failed to download any images for short synthesis.")
+        return False
+
+    PipelineLogger.info(f"Synthesizing 1080x1920 MP4 Reel ({len(downloaded_paths)} slide(s)) with FastStart...")
+    if len(downloaded_paths) == 1:
+        success = render_image_to_short(downloaded_paths[0], output_mp4, duration_sec=5.0)
+    else:
+        success = render_carousel_to_short(downloaded_paths, output_mp4, sec_per_slide=3.5)
+
+    for p in downloaded_paths:
+        try: os.remove(p)
+        except Exception: pass
+
+    return success
+
+
 def fetch_metadata(url: str) -> Optional[Tuple[dict, str]]:
     """
-    Fetches video metadata using yt-dlp.
+    Fetches video metadata using yt-dlp with automatic fallback to Resilient Scraper.
     Never exits abruptly on error: prompts user to retry or provide a new URL.
     Returns (meta_dict, final_url) or None if cancelled.
     """
     current_url = url
     while True:
         PipelineLogger.info(f"{C_YELLOW}> Analyzing media source and extracting metadata...{C_RESET}")
-        cmd = ["yt-dlp", "--dump-single-json", "--no-download", current_url]
+        cmd = ["yt-dlp", "--write-comments", "--dump-single-json", "--no-download", current_url]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0:
             try:
                 meta = json.loads(res.stdout)
+                formats = meta.get("formats") or []
+                has_video = any(f.get("vcodec") and f.get("vcodec") != "none" for f in formats)
+                if not has_video and (meta.get("thumbnails") or meta.get("thumbnail")):
+                    meta["is_image"] = True
                 PipelineLogger.success(f"Metadata extracted: '{meta.get('title', 'Unknown')[:50]}'")
                 return meta, current_url
             except json.JSONDecodeError as e:
                 err_text = f"JSON decode failed: {e}"
         else:
             err_text = res.stderr.strip() if res.stderr else "yt-dlp failed to inspect URL"
+
+        # Resilient Scraper Fallback for Instagram & Social Posts
+        if "instagram.com" in current_url.lower():
+            PipelineLogger.info("Invoking Resilient Instagram Metadata Scraper...")
+            fallback_meta = extract_instagram_metadata_fallback(current_url)
+            if fallback_meta:
+                PipelineLogger.success(f"Resilient Metadata Extracted: '{fallback_meta.get('title', 'Unknown')[:50]}'")
+                return fallback_meta, current_url
 
         action = prompt_on_error(f"Failed to fetch video metadata: {err_text}")
         if action == "retry":
@@ -760,14 +1044,59 @@ def ensure_colab_authenticated() -> bool:
 
 # ─── 1. Shorts Pipeline (<= 120s) ─────────────────────────────────────────────
 
+VIRAL_BAIT_REGEX = re.compile(
+    r"\b(?:wait\s+(?:for|till)|watch\s+till|sound\s+at|look\s+at|share\s+with|tag\s+(?:your|someone)|"
+    r"mention\s+your|send\s+this|drop\s+a|double\s+tap|save\s+this|follow\s+(?:for|me)|"
+    r"credits?\s+to|dm\s+for|all\s+rights|relatable|so\s+true|literally\s+me|fr\s+fr)\b",
+    re.IGNORECASE
+)
+
+VIRAL_TAGS_SET = {
+    "fyp", "viral", "foryou", "foryoupage", "explore", "explorepage", "reels",
+    "trending", "trend", "reelsinstagram", "viralreels", "instadaily", "reelsindia",
+    "virel", "virelpost", "post", "love", "like", "follow", "share", "comment",
+    "video", "short", "shorts", "reelsvideo", "status", "viralvideo", "reelschallenge",
+    "hilights", "follower", "followers", "instagram", "insta"
+}
+
+def synthesize_native_short_title(raw_title: str, caption: str, username: str, platform: str) -> str:
+    """Replaces generic 'Video by <username>' and viral bait captions with native contextual titles."""
+    cleaned = strip_emojis(raw_title or "").strip()
+    if (not cleaned.lower().startswith("video by ") and not cleaned.lower().startswith("short by ")
+        and len(cleaned) > 5 and not VIRAL_BAIT_REGEX.search(cleaned)):
+        return cleaned
+
+    clean_cap = re.sub(r'https?://\S+', '', caption or "").strip()
+    lines = [l.strip() for l in clean_cap.splitlines() if l.strip()]
+    for line in lines:
+        l_no_tags = re.sub(r'#[a-zA-Z0-9_]+', '', line).strip()
+        l_clean = re.sub(r'^[.\s]+', '', l_no_tags).strip()
+        if (len(l_clean) >= 8 and not l_clean.startswith(('http', '@', 'Video by', 'Release:', 'Genre:'))
+            and not VIRAL_BAIT_REGEX.search(l_clean)):
+            delim_parts = re.split(r'[|•\n]', l_clean)
+            headline = delim_parts[0].strip(' "“‘”’')
+            if 8 <= len(headline) <= 65 and not VIRAL_BAIT_REGEX.search(headline):
+                return headline[0].upper() + headline[1:]
+
+    tags = re.findall(r'#([a-zA-Z0-9_]+)', caption or "")
+    meaningful = [t for t in tags if t.lower() not in VIRAL_TAGS_SET]
+    if meaningful:
+        words = [t.replace('_', ' ').title() for t in meaningful[:3]]
+        return f"{' • '.join(words)}"
+
+    handle_clean = username.replace('_', ' ').title()
+    return f"Spotlight • {handle_clean}"
+
+
 def handle_short_pipeline(meta: dict, url: str, classification_reason: str = ""):
-    title = strip_emojis(meta.get("title") or "Untitled Short")
+    raw_title = strip_emojis(meta.get("title") or "Untitled Short")
     duration = float(meta.get("duration") or 0.0)
     platform = detect_platform(url)
     username, display_name = extract_clean_author_handle(meta, platform)
 
     auto_tags, auto_desc, _ = extract_automated_metadata(meta, platform)
-    caption = strip_emojis(auto_desc if auto_desc else title)
+    caption = strip_emojis(auto_desc if auto_desc else raw_title)
+    title = synthesize_native_short_title(raw_title, caption, username, platform)
 
     dur_info = f"{duration:.1f}s <= 120s" if duration > 0 else f"Auto-detected ({classification_reason})"
 
@@ -860,97 +1189,138 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
                 PipelineLogger.warn(f"Colab short execution error: {e}. Falling back to local download...")
 
     # 2. Download Short with Live Terminal Logs
-    temp_dir = "/data/data/com.termux/files/usr/tmp/akash_media"
+    import secrets
+    run_token = secrets.token_hex(4)
+    temp_dir = f"/data/data/com.termux/files/usr/tmp/akash_media/short_{os.getpid()}_{run_token}"
     os.makedirs(temp_dir, exist_ok=True)
     temp_file = os.path.join(temp_dir, "short.mp4")
 
-    dl_cmd = [
-        "yt-dlp",
-        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "--merge-output-format", "mp4",
-        "-o", temp_file,
-        url
-    ]
+    is_image_source = bool(meta.get("is_image") or meta.get("image_urls") or (platform == "instagram" and "/p/" in url.lower()))
 
-    while True:
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except Exception:
-                pass
-
-        exit_code = PipelineLogger.live_exec(dl_cmd, desc="Downloading short video with yt-dlp...")
-        if exit_code == 0 and os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
-            break
-
-        action = prompt_on_error("Download failed or output file is empty.")
-        if action == "retry":
-            dl_cmd = ["yt-dlp", "-f", "best", "-o", temp_file, url]
-            continue
+    try:
+        if is_image_source:
+            PipelineLogger.info("Image/Post media detected. Synthesizing sovereign short MP4...")
+            syn_ok = synthesize_short_from_images(meta, url, temp_dir, temp_file)
+            if not syn_ok:
+                PipelineLogger.warn("Initial image synthesis failed. Attempting fallback metadata extraction...")
+                fb_meta = extract_instagram_metadata_fallback(url)
+                if fb_meta:
+                    meta.update(fb_meta)
+                    syn_ok = synthesize_short_from_images(meta, url, temp_dir, temp_file)
+            if not syn_ok:
+                PipelineLogger.error("Failed to synthesize short video from image post.")
+                prompt_on_error("Failed to synthesize short video from image post.", allow_retry=False)
+                return
         else:
+            dl_cmd = [
+                "yt-dlp",
+                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "--merge-output-format", "mp4",
+                "-o", temp_file,
+                url
+            ]
+
+            while True:
+                if os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except Exception:
+                        pass
+
+                exit_code = PipelineLogger.live_exec(dl_cmd, desc="Downloading short video with yt-dlp...")
+                if exit_code == 0 and os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+                    # FastStart container optimization (+faststart moov atom at byte 0 for <50ms instant play)
+                    faststart_file = os.path.join(temp_dir, "short_faststart.mp4")
+                    try:
+                        PipelineLogger.info("Optimizing MP4 container with FastStart (moov atom at Byte 0)...")
+                        fs_proc = subprocess.run(
+                            ["ffmpeg", "-y", "-i", temp_file, "-c", "copy", "-movflags", "+faststart", faststart_file],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15
+                        )
+                        if fs_proc.returncode == 0 and os.path.exists(faststart_file) and os.path.getsize(faststart_file) > 0:
+                            os.replace(faststart_file, temp_file)
+                            PipelineLogger.success("FastStart enabled: Video index header placed at Byte 0")
+                    except Exception as e:
+                        PipelineLogger.warn(f"FastStart remux skipped: {e}")
+                    break
+
+                # Direct download failed: attempt resilient synthesis from high-res image
+                PipelineLogger.warn("Direct video stream unavailable. Attempting sovereign short synthesis from media...")
+                fb_meta = extract_instagram_metadata_fallback(url)
+                if fb_meta and synthesize_short_from_images(fb_meta, url, temp_dir, temp_file):
+                    meta.update(fb_meta)
+                    PipelineLogger.success("Sovereign Short MP4 synthesized successfully from media!")
+                    break
+
+                action = prompt_on_error("Download failed or output file is empty.")
+                if action == "retry":
+                    dl_cmd = ["yt-dlp", "-f", "best", "-o", temp_file, url]
+                    continue
+                else:
+                    return
+
+        # If duration was 0 or undetected, measure exact duration using ffprobe
+        if duration <= 0.0:
+            duration = probe_media_duration(temp_file)
+            if duration > 0:
+                PipelineLogger.info(f"Exact duration probed via ffprobe: {duration:.1f}s")
+
+        # Pre-upload Media Verification: Verify that file is genuinely an image or video
+        PipelineLogger.info(" Pre-upload verification: Verifying media integrity...")
+        is_valid, media_type, meta_info = inspect_media_file(temp_file)
+        if not is_valid:
+            PipelineLogger.error(f"[ERROR] Upload rejected! '{temp_file}' is neither a valid image nor a video (Error: {media_type}).")
+            prompt_on_error(f"Media validation failed: file is not a supported video or image ({media_type}).", allow_retry=False)
             return
+        PipelineLogger.success(f"[VERIFIED] Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
 
-    # If duration was 0 or undetected, measure exact duration using ffprobe
-    if duration <= 0.0:
-        duration = probe_media_duration(temp_file)
-        if duration > 0:
-            PipelineLogger.info(f"Exact duration probed via ffprobe: {duration:.1f}s")
+        # 3. Upload to Server with Live Progress
+        upload_url = f"{SERVER_BASE_URL}{ROUTE_UPLOAD}"
+        data = {
+            "author": username,
+            "title": title,
+            "caption": caption[:1500],
+            "is_short": "true",
+            "source_url": url
+        }
+        if meta.get("comments"):
+            data["comments_json"] = json.dumps(meta["comments"][:100])
 
-    # Pre-upload Media Verification: Verify that file is genuinely an image or video
-    PipelineLogger.info(" Pre-upload verification: Verifying media integrity...")
-    is_valid, media_type, meta_info = inspect_media_file(temp_file)
-    if not is_valid:
-        PipelineLogger.error(f"[ERROR] Upload rejected! '{temp_file}' is neither a valid image nor a video (Error: {media_type}).")
-        prompt_on_error(f"Media validation failed: file is not a supported video or image ({media_type}).", allow_retry=False)
-        return
-    PipelineLogger.success(f"[VERIFIED] Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
+        uploaded = False
+        while not uploaded:
+            PipelineLogger.info(f"Uploading via High-Security Obfuscated Tunnel ({SERVER_BASE_URL})...")
+            try:
+                file_size = os.path.getsize(temp_file)
+                with ProgressFileReader(temp_file, file_size) as pr_file:
+                    files = {"file": ("media.mp4", pr_file, "video/mp4")}
+                    res = requests.post(upload_url, data=data, files=files, headers=HEADERS, timeout=180)
 
-    # 3. Upload to Server with Live Progress
-    upload_url = f"{SERVER_BASE_URL}{ROUTE_UPLOAD}"
-    data = {
-        "author": username,
-        "title": title,
-        "caption": caption[:1500],
-        "is_short": "true",
-        "source_url": url
-    }
+                sys.stdout.write("\n")
+                if res.status_code == 200:
+                    resp = res.json()
+                    stream_url = resp.get("playback", {}).get("full_ott_stream_url") or resp.get("stream_url") or resp.get("playback", {}).get("full_stream_url") or f"{SERVER_BASE_URL}{ROUTE_STREAM}/{resp.get('file_code')}"
+                    send_toast(f"Short Uploaded! @{username}")
 
-    uploaded = False
-    while not uploaded:
-        PipelineLogger.info(f"Uploading via High-Security Obfuscated Tunnel ({SERVER_BASE_URL})...")
-        try:
-            file_size = os.path.getsize(temp_file)
-            with ProgressFileReader(temp_file, file_size) as pr_file:
-                files = {"file": ("media.mp4", pr_file, "video/mp4")}
-                res = requests.post(upload_url, data=data, files=files, headers=HEADERS, timeout=180)
-
-            sys.stdout.write("\n")
-            if res.status_code == 200:
-                resp = res.json()
-                stream_url = resp.get("playback", {}).get("full_ott_stream_url") or resp.get("stream_url") or resp.get("playback", {}).get("full_stream_url") or f"{SERVER_BASE_URL}{ROUTE_STREAM}/{resp.get('file_code')}"
-                send_toast(f"Short Uploaded! @{username}")
-
-                PipelineLogger.success("REEL / SHORT PUBLISHED LIVE!")
-                print(f"\n{C_GREEN}╔════════════════════════════════════════════════════════════╗{C_RESET}")
-                print(f"{C_GREEN}║              REEL / SHORT PUBLISHED LIVE!                  ║{C_RESET}")
-                print(f"{C_GREEN}╚════════════════════════════════════════════════════════════╝{C_RESET}")
-                print(f"{C_BOLD} Stream URL:{C_RESET}   {C_CYAN}{stream_url}{C_RESET}")
-                print(f"{C_BOLD} Creator:{C_RESET}      @{username}")
-                print(f"{C_BOLD} Duration:{C_RESET}     {duration:.1f}s")
-                print(f"{C_GRAY} Logs saved to: {LOG_FILE}{C_RESET}\n")
-                uploaded = True
-            else:
-                action = prompt_on_error(f"Upload failed (HTTP {res.status_code}): {res.text}")
+                    PipelineLogger.success("REEL / SHORT PUBLISHED LIVE!")
+                    print(f"\n{C_GREEN}╔════════════════════════════════════════════════════════════╗{C_RESET}")
+                    print(f"{C_GREEN}║              REEL / SHORT PUBLISHED LIVE!                  ║{C_RESET}")
+                    print(f"{C_GREEN}╚════════════════════════════════════════════════════════════╝{C_RESET}")
+                    print(f"{C_BOLD} Stream URL:{C_RESET}   {C_CYAN}{stream_url}{C_RESET}")
+                    print(f"{C_BOLD} Creator:{C_RESET}      @{username}")
+                    print(f"{C_BOLD} Duration:{C_RESET}     {duration:.1f}s")
+                    print(f"{C_GRAY} Logs saved to: {LOG_FILE}{C_RESET}\n")
+                    uploaded = True
+                else:
+                    action = prompt_on_error(f"Upload failed (HTTP {res.status_code}): {res.text}")
+                    if action != "retry":
+                        break
+            except Exception as e:
+                action = prompt_on_error(f"Network error during upload: {e}")
                 if action != "retry":
                     break
-        except Exception as e:
-            action = prompt_on_error(f"Network error during upload: {e}")
-            if action != "retry":
-                break
-
-    if os.path.exists(temp_file):
+    finally:
         try:
-            os.remove(temp_file)
+            shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception:
             pass
 
@@ -1123,7 +1493,9 @@ def handle_long_pipeline(meta: dict, url: str):
                     pass
 
     # Fallback / Direct Mode: Download and upload with Live Logs
-    temp_dir = "/data/data/com.termux/files/usr/tmp/akash_media"
+    import secrets
+    run_token = secrets.token_hex(4)
+    temp_dir = f"/data/data/com.termux/files/usr/tmp/akash_media/long_{os.getpid()}_{run_token}"
     os.makedirs(temp_dir, exist_ok=True)
     temp_file = os.path.join(temp_dir, "long_video.mp4")
 
@@ -1136,88 +1508,101 @@ def handle_long_pipeline(meta: dict, url: str):
         url
     ]
 
-    while True:
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except Exception:
-                pass
+    try:
+        while True:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception:
+                    pass
 
-        exit_code = PipelineLogger.live_exec(dl_cmd, desc="Downloading video locally with yt-dlp...")
-        if exit_code == 0 and os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
-            break
-
-        action = prompt_on_error("Download failed or output file is empty.")
-        if action == "retry":
-            dl_cmd = ["yt-dlp", "-f", "best", "-o", temp_file, url]
-            continue
-        else:
-            return
-
-    if duration <= 0.0:
-        duration = probe_media_duration(temp_file)
-        if duration > 0:
-            minutes = int(duration // 60)
-            seconds = int(duration % 60)
-            PipelineLogger.info(f"Exact duration probed via ffprobe: {minutes}m {seconds}s")
-
-    # Pre-upload Media Verification: Ensure file is genuine image or video
-    PipelineLogger.info(" Pre-upload verification: Verifying media integrity...")
-    is_valid, media_type, meta_info = inspect_media_file(temp_file)
-    if not is_valid:
-        PipelineLogger.error(f"[ERROR] Upload rejected! '{temp_file}' is neither a valid image nor a video (Error: {media_type}).")
-        prompt_on_error(f"Media validation failed: file is not a supported video or image ({media_type}).", allow_retry=False)
-        return
-    PipelineLogger.success(f"[VERIFIED] Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
-
-    upload_url = f"{SERVER_BASE_URL}{ROUTE_UPLOAD}"
-    data = {
-        "profile_name": selected_profile_name,
-        "title": title,
-        "caption": auto_desc[:3000],
-        "tags": auto_tags,
-        "author": uploader,
-        "is_short": "false",
-        "source_url": url
-    }
-
-    uploaded = False
-    while not uploaded:
-        PipelineLogger.info(f"Uploading via High-Security Obfuscated Tunnel ({SERVER_BASE_URL})...")
-        try:
-            file_size = os.path.getsize(temp_file)
-            with ProgressFileReader(temp_file, file_size) as pr_file:
-                files = {"file": ("media.mp4", pr_file, "video/mp4")}
-                res = requests.post(upload_url, data=data, files=files, headers=HEADERS, timeout=360)
-
-            sys.stdout.write("\n")
-            if res.status_code == 200:
-                resp = res.json()
-                stream_url = resp.get("playback", {}).get("full_ott_stream_url") or resp.get("stream_url") or resp.get("playback", {}).get("full_stream_url") or f"{SERVER_BASE_URL}{ROUTE_STREAM}/{resp.get('file_code')}"
-                send_toast(f"Video Uploaded: {title[:20]}...")
-
-                PipelineLogger.success("LONG VIDEO PUBLISHED SUCCESSFULLY!")
-                print(f"\n{C_GREEN}╔════════════════════════════════════════════════════════════╗{C_RESET}")
-                print(f"{C_GREEN}║              VIDEO PUBLISHED SUCCESSFULLY!                 ║{C_RESET}")
-                print(f"{C_GREEN}╚════════════════════════════════════════════════════════════╝{C_RESET}")
-                print(f"{C_BOLD} Stream URL:{C_RESET}   {C_CYAN}{stream_url}{C_RESET}")
-                print(f"{C_BOLD} Profile:{C_RESET}      {selected_profile_name}")
-                print(f"{C_BOLD} Auto-Tags:{C_RESET}    {auto_tags}")
-                print(f"{C_BOLD} Duration:{C_RESET}     {minutes}m {seconds}s")
-                print(f"{C_GRAY} Logs saved to: {LOG_FILE}{C_RESET}\n")
-                uploaded = True
-            else:
-                action = prompt_on_error(f"Upload failed (HTTP {res.status_code}): {res.text}")
-                if action != "retry":
-                    break
-        except Exception as e:
-            action = prompt_on_error(f"Network error during upload: {e}")
-            if action != "retry":
+            exit_code = PipelineLogger.live_exec(dl_cmd, desc="Downloading video locally with yt-dlp...")
+            if exit_code == 0 and os.path.exists(temp_file) and os.path.getsize(temp_file) > 0:
+                # FastStart container optimization (+faststart moov atom at byte 0)
+                faststart_file = os.path.join(temp_dir, "long_faststart.mp4")
+                try:
+                    fs_proc = subprocess.run(
+                        ["ffmpeg", "-y", "-i", temp_file, "-c", "copy", "-movflags", "+faststart", faststart_file],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=25
+                    )
+                    if fs_proc.returncode == 0 and os.path.exists(faststart_file) and os.path.getsize(faststart_file) > 0:
+                        os.replace(faststart_file, temp_file)
+                except Exception:
+                    pass
                 break
 
-    if os.path.exists(temp_file):
+            action = prompt_on_error("Download failed or output file is empty.")
+            if action == "retry":
+                dl_cmd = ["yt-dlp", "-f", "best", "-o", temp_file, url]
+                continue
+            else:
+                return
+
+        if duration <= 0.0:
+            duration = probe_media_duration(temp_file)
+            if duration > 0:
+                minutes = int(duration // 60)
+                seconds = int(duration % 60)
+                PipelineLogger.info(f"Exact duration probed via ffprobe: {minutes}m {seconds}s")
+
+        # Pre-upload Media Verification: Ensure file is genuine image or video
+        PipelineLogger.info(" Pre-upload verification: Verifying media integrity...")
+        is_valid, media_type, meta_info = inspect_media_file(temp_file)
+        if not is_valid:
+            PipelineLogger.error(f"[ERROR] Upload rejected! '{temp_file}' is neither a valid image nor a video (Error: {media_type}).")
+            prompt_on_error(f"Media validation failed: file is not a supported video or image ({media_type}).", allow_retry=False)
+            return
+        PipelineLogger.success(f"[VERIFIED] Verified Media: {media_type.upper()} ({meta_info.get('codec')}, {meta_info.get('width')}x{meta_info.get('height')}, {meta_info.get('duration', 0):.1f}s)")
+
+        upload_url = f"{SERVER_BASE_URL}{ROUTE_UPLOAD}"
+        data = {
+            "profile_name": selected_profile_name,
+            "title": title,
+            "caption": auto_desc[:3000],
+            "tags": auto_tags,
+            "author": uploader,
+            "is_short": "false",
+            "source_url": url
+        }
+        if meta.get("comments"):
+            data["comments_json"] = json.dumps(meta["comments"][:100])
+
+        uploaded = False
+        while not uploaded:
+            PipelineLogger.info(f"Uploading via High-Security Obfuscated Tunnel ({SERVER_BASE_URL})...")
+            try:
+                file_size = os.path.getsize(temp_file)
+                with ProgressFileReader(temp_file, file_size) as pr_file:
+                    files = {"file": ("media.mp4", pr_file, "video/mp4")}
+                    res = requests.post(upload_url, data=data, files=files, headers=HEADERS, timeout=360)
+
+                sys.stdout.write("\n")
+                if res.status_code == 200:
+                    resp = res.json()
+                    stream_url = resp.get("playback", {}).get("full_ott_stream_url") or resp.get("stream_url") or resp.get("playback", {}).get("full_stream_url") or f"{SERVER_BASE_URL}{ROUTE_STREAM}/{resp.get('file_code')}"
+                    send_toast(f"Video Uploaded: {title[:20]}...")
+
+                    PipelineLogger.success("LONG VIDEO PUBLISHED SUCCESSFULLY!")
+                    print(f"\n{C_GREEN}╔════════════════════════════════════════════════════════════╗{C_RESET}")
+                    print(f"{C_GREEN}║              VIDEO PUBLISHED SUCCESSFULLY!                 ║{C_RESET}")
+                    print(f"{C_GREEN}╚════════════════════════════════════════════════════════════╝{C_RESET}")
+                    print(f"{C_BOLD} Stream URL:{C_RESET}   {C_CYAN}{stream_url}{C_RESET}")
+                    print(f"{C_BOLD} Profile:{C_RESET}      {selected_profile_name}")
+                    print(f"{C_BOLD} Auto-Tags:{C_RESET}    {auto_tags}")
+                    print(f"{C_BOLD} Duration:{C_RESET}     {minutes}m {seconds}s")
+                    print(f"{C_GRAY} Logs saved to: {LOG_FILE}{C_RESET}\n")
+                    uploaded = True
+                else:
+                    action = prompt_on_error(f"Upload failed (HTTP {res.status_code}): {res.text}")
+                    if action != "retry":
+                        break
+            except Exception as e:
+                action = prompt_on_error(f"Network error during upload: {e}")
+                if action != "retry":
+                    break
+    finally:
         try:
-            os.remove(temp_file)
+            shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception:
             pass
 
@@ -1404,6 +1789,10 @@ def run_pipeline():
         existing_early = check_existing_vault_media(url)
         if existing_early:
             print_existing_vault_media(existing_early)
+            is_auto = len(sys.argv) > 1 or bool(os.getenv("TERMUX_URL_OPENER_HANDLES_PAUSE"))
+            if is_auto:
+                PipelineLogger.info("Media already stored in Akash Sovereign Vault. Skipping re-upload.")
+                return
             choice = safe_input(f"{C_YELLOW}Media already in vault. Force re-process/re-upload? (y/N): {C_RESET}").strip().lower()
             if choice not in ("y", "yes"):
                 return
@@ -1417,6 +1806,10 @@ def run_pipeline():
         existing_meta = check_existing_vault_media(active_url, meta=meta)
         if existing_meta:
             print_existing_vault_media(existing_meta)
+            is_auto = len(sys.argv) > 1 or bool(os.getenv("TERMUX_URL_OPENER_HANDLES_PAUSE"))
+            if is_auto:
+                PipelineLogger.info("Media already stored in Akash Sovereign Vault. Skipping re-upload.")
+                return
             choice = safe_input(f"{C_YELLOW}Media already in vault. Force re-process/re-upload? (y/N): {C_RESET}").strip().lower()
             if choice not in ("y", "yes"):
                 return
@@ -1443,12 +1836,11 @@ def main():
         PipelineLogger.error(f"Fatal error: {e}\n{tb}")
         prompt_on_error(f"Unexpected error: {e}\n\n{tb}", allow_retry=False)
     finally:
-        # Prompt user to press enter before exiting so results and stream URLs remain visible
-        if not os.getenv("TERMUX_URL_OPENER_HANDLES_PAUSE"):
+        # Only prompt user if running in interactive mode without an automated URL argument
+        if len(sys.argv) <= 1 and not os.getenv("TERMUX_URL_OPENER_HANDLES_PAUSE") and sys.stdin.isatty():
             try:
-                if sys.stdin.isatty() or os.path.exists("/dev/tty"):
-                    print(f"\n{C_GRAY}────────────────────────────────────────────────────────────{C_RESET}")
-                    safe_input(f"{C_BOLD}{C_GREEN}Press [Enter] to exit...{C_RESET}")
+                print(f"\n{C_GRAY}────────────────────────────────────────────────────────────{C_RESET}")
+                safe_input(f"{C_BOLD}{C_GREEN}Press [Enter] to exit...{C_RESET}")
             except Exception:
                 pass
 

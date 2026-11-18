@@ -48,6 +48,18 @@ def ensure_dependencies():
         subprocess.run(["apt-get", "update", "-qq"], check=False)
         subprocess.run(["apt-get", "install", "-y", "-qq"] + packages_to_install, check=True)
 
+    # Ensure Deno JS runtime is present for yt-dlp challenge execution
+    try:
+        subprocess.run(["deno", "--version"], check=True, capture_output=True)
+    except Exception:
+        print(">>> Installing Deno JS engine for yt-dlp...")
+        subprocess.run("curl -fsSL https://deno.land/install.sh | sh", shell=True, check=False)
+        subprocess.run("cp -f ~/.deno/bin/deno /usr/local/bin/deno 2>/dev/null || ln -sf ~/.deno/bin/deno /usr/local/bin/deno 2>/dev/null", shell=True, check=False)
+        deno_bin = os.path.expanduser("~/.deno/bin")
+        if os.path.exists(deno_bin) and deno_bin not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{deno_bin}:/usr/local/bin:{os.environ.get('PATH', '')}"
+            os.environ["PATH"] = f"{deno_bin}:{os.environ.get('PATH', '')}"
+
     print(">>> Upgrading yt-dlp and requests to latest versions...")
     subprocess.run([sys.executable, "-m", "pip", "install", "-U", "-q", "yt-dlp", "requests"], check=True)
 
@@ -59,6 +71,29 @@ def check_gpu_nvenc():
         return "h264_nvenc" in res.stdout
     except Exception:
         return False
+
+
+def get_hw_decode_args(video_path, use_gpu):
+    """Detects video codec and returns matching NVIDIA NVDEC hardware decoder flags."""
+    if not use_gpu:
+        return []
+    try:
+        p_cmd = [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name",
+            "-of", "csv=p=0", video_path
+        ]
+        res = subprocess.run(p_cmd, capture_output=True, text=True)
+        codec = res.stdout.strip().lower()
+        if codec == "vp9":
+            return ["-c:v", "vp9_cuvid"]
+        elif codec == "h264":
+            return ["-c:v", "h264_cuvid"]
+        elif codec in ("hevc", "h265"):
+            return ["-c:v", "hevc_cuvid"]
+    except Exception:
+        pass
+    return ["-hwaccel", "cuda"]
 
 
 def run_ffmpeg_with_progress(cmd, label):
@@ -102,8 +137,8 @@ def probe_metadata(url, default_author=""):
     print(">>> Probing video metadata...")
     commands = [
         [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=visionos,android", "--dump-single-json", "--no-download", url],
-        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=visionos", "--dump-single-json", "--no-download", url],
-        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=android", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=tv_embedded,ios,web,android", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=mweb,ios", "--dump-single-json", "--no-download", url],
         [sys.executable, "-m", "yt_dlp", "--dump-single-json", "--no-download", url]
     ]
     last_err = ""
@@ -127,8 +162,8 @@ def download_source_video(url, output_path):
         [
             sys.executable, "-m", "yt_dlp",
             "--extractor-args", "youtube:player_client=visionos,android",
-            "-f", "bestvideo[protocol^=http]+bestaudio[protocol^=http]/bestvideo+bestaudio/best",
-            "--format-sort", "res,fps,proto:https",
+            "-f", "315+251/315+140/337+251/bestvideo[height>=2160][vcodec^=vp9]+bestaudio/701+251/bestvideo[height>=2160]+bestaudio/bestvideo+bestaudio/best",
+            "--format-sort", "res:2160,fps:60,res,fps",
             "--merge-output-format", "mp4",
             "--newline",
             "--progress",
@@ -137,9 +172,9 @@ def download_source_video(url, output_path):
         ],
         [
             sys.executable, "-m", "yt_dlp",
-            "--extractor-args", "youtube:player_client=visionos",
+            "--extractor-args", "youtube:player_client=visionos,android",
             "-f", "bestvideo+bestaudio/best",
-            "--format-sort", "res,fps,proto:https",
+            "--format-sort", "res:2160,fps:60,res,fps",
             "--merge-output-format", "mp4",
             "--newline",
             "--progress",
@@ -148,8 +183,9 @@ def download_source_video(url, output_path):
         ],
         [
             sys.executable, "-m", "yt_dlp",
-            "--extractor-args", "youtube:player_client=android",
-            "-f", "bestvideo+bestaudio/best",
+            "--extractor-args", "youtube:player_client=web,android",
+            "-f", "bestvideo[height>=1080]+bestaudio/bestvideo+bestaudio/best",
+            "--format-sort", "res:2160,fps:60,res,fps",
             "--merge-output-format", "mp4",
             "--newline",
             "--progress",
@@ -159,6 +195,7 @@ def download_source_video(url, output_path):
         [
             sys.executable, "-m", "yt_dlp",
             "-f", "bestvideo+bestaudio/best",
+            "--format-sort", "res:2160,fps:60,res,fps",
             "--merge-output-format", "mp4",
             "--newline",
             "--progress",
@@ -183,8 +220,15 @@ def download_source_video(url, output_path):
         if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             print(f"\n>>> Download succeeded on attempt {idx} (Size: {os.path.getsize(output_path) / (1024*1024):.1f} MB)")
             return True
-        else:
-            print(f"\n>>> Download attempt {idx} failed with exit code {proc.returncode}. Trying next method...")
+        for alt_ext in [".mp4", ".mkv", ".webm"]:
+            alt_path = os.path.splitext(output_path)[0] + alt_ext
+            if os.path.exists(alt_path) and os.path.getsize(alt_path) > 0:
+                if alt_path != output_path:
+                    shutil.move(alt_path, output_path)
+                print(f"\n>>> Download succeeded on attempt {idx} (Size: {os.path.getsize(output_path) / (1024*1024):.1f} MB)")
+                return True
+
+        print(f"\n>>> Download attempt {idx} failed with exit code {proc.returncode}. Trying next method...")
 
     return False
 
@@ -294,16 +338,19 @@ def main():
     if args.is_short:
         print(">>> Processing Short / Reel on Colab GPU...")
         short_out = os.path.join(work_dir, "short_opt.mp4")
-        short_cmd = [
-            "ffmpeg", "-y", "-i", source_file,
+        hw_dec = get_hw_decode_args(source_file, use_nvenc)
+        short_cmd = (
+            ["ffmpeg", "-y"] +
+            hw_dec +
+            ["-i", source_file,
             "-vf", "format=yuv420p",
             "-c:v", v_codec,
             "-pix_fmt", "yuv420p",
             "-preset", preset,
             "-b:v", "3500k", "-maxrate", "4000k", "-bufsize", "7000k",
             "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
-            short_out
-        ]
+            short_out]
+        )
         rc, err = run_ffmpeg_with_progress(short_cmd, "Short")
         if rc != 0:
             print(f">>> GPU NVENC short transcode failed (Code {rc}). Retrying with CPU libx264...")
@@ -366,9 +413,7 @@ def main():
         {"name": "1080p", "w": 1920, "h": 1080, "bitrate": "4200k",  "maxrate": "5000k",  "buf": "8500k",  "audio": "192k"},
         {"name": "720p",  "w": 1280, "h": 720,  "bitrate": "2200k",  "maxrate": "2600k",  "buf": "4500k",  "audio": "128k"},
         {"name": "480p",  "w": 854,  "h": 480,  "bitrate": "1000k",  "maxrate": "1200k",  "buf": "2000k",  "audio": "96k"},
-        {"name": "360p",  "w": 640,  "h": 360,  "bitrate": "600k",   "maxrate": "750k",   "buf": "1200k",  "audio": "64k"},
-        {"name": "240p",  "w": 426,  "h": 240,  "bitrate": "350k",   "maxrate": "450k",   "buf": "700k",   "audio": "64k"},
-        {"name": "144p",  "w": 256,  "h": 144,  "bitrate": "180k",   "maxrate": "240k",   "buf": "400k",   "audio": "48k"}
+        {"name": "360p",  "w": 640,  "h": 360,  "bitrate": "600k",   "maxrate": "750k",   "buf": "1200k",  "audio": "64k"}
     ]
 
     # Generate all qualities supported by source video (up to 4K / 2160p)
@@ -398,8 +443,11 @@ def main():
 
         if q["name"] == "1080p" and base_1080p_file:
             print(">>> Generating optimized 1080p master for rapid multi-tier downscaling...")
-            gen_base_cmd = [
-                "ffmpeg", "-y", "-i", source_file,
+            hw_dec = get_hw_decode_args(source_file, use_nvenc)
+            gen_base_cmd = (
+                ["ffmpeg", "-y"] +
+                hw_dec +
+                ["-i", source_file,
                 "-vf", scale_filter,
                 "-c:v", v_codec,
                 "-pix_fmt", "yuv420p",
@@ -410,8 +458,8 @@ def main():
                 "-c:a", "aac",
                 "-b:a", q["audio"],
                 "-ar", "44100",
-                base_1080p_file
-            ]
+                base_1080p_file]
+            )
             rc, err = run_ffmpeg_with_progress(gen_base_cmd, "1080p Master")
             if rc != 0:
                 print(f">>> GPU NVENC 1080p base failed (Code {rc}). Retrying with CPU libx264...")
@@ -450,8 +498,11 @@ def main():
             if q["h"] <= 720 and base_1080p_file and os.path.exists(base_1080p_file):
                 input_file = base_1080p_file
 
-            ffmpeg_cmd = [
-                "ffmpeg", "-y", "-i", input_file,
+            hw_dec = get_hw_decode_args(input_file, use_nvenc)
+            ffmpeg_cmd = (
+                ["ffmpeg", "-y"] +
+                hw_dec +
+                ["-i", input_file,
                 "-vf", scale_filter,
                 "-c:v", v_codec,
                 "-pix_fmt", "yuv420p",
@@ -466,8 +517,8 @@ def main():
                 "-hls_time", "4",
                 "-hls_playlist_type", "vod",
                 "-hls_segment_filename", segment_pattern,
-                playlist_path
-            ]
+                playlist_path]
+            )
             rc, err = run_ffmpeg_with_progress(ffmpeg_cmd, q["name"])
             if rc != 0:
                 print(f">>> GPU NVENC failed for {q['name']} (Code {rc}). Retrying with CPU libx264...")
