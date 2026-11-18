@@ -60,8 +60,8 @@ def ensure_dependencies():
             os.environ["PATH"] = f"{deno_bin}:/usr/local/bin:{os.environ.get('PATH', '')}"
             os.environ["PATH"] = f"{deno_bin}:{os.environ.get('PATH', '')}"
 
-    print(">>> Upgrading yt-dlp and requests to latest versions...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-U", "-q", "yt-dlp", "requests"], check=True)
+    print(">>> Upgrading yt-dlp, yt-dlp-ejs, and requests to latest versions...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-U", "-q", "yt-dlp", "yt-dlp-ejs", "requests"], check=True)
 
 
 def check_gpu_nvenc():
@@ -136,10 +136,10 @@ def run_ffmpeg_with_progress(cmd, label):
 def probe_metadata(url, default_author=""):
     print(">>> Probing video metadata...")
     commands = [
-        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=visionos,android", "--dump-single-json", "--no-download", url],
-        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=tv_embedded,ios,web,android", "--dump-single-json", "--no-download", url],
-        [sys.executable, "-m", "yt_dlp", "--extractor-args", "youtube:player_client=mweb,ios", "--dump-single-json", "--no-download", url],
-        [sys.executable, "-m", "yt_dlp", "--dump-single-json", "--no-download", url]
+        [sys.executable, "-m", "yt_dlp", "--remote-components", "ejs:github", "--extractor-args", "youtube:player_client=visionos,android", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--remote-components", "ejs:github", "--extractor-args", "youtube:player_client=tv_embedded,ios,web,android", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--remote-components", "ejs:github", "--extractor-args", "youtube:player_client=mweb,ios", "--dump-single-json", "--no-download", url],
+        [sys.executable, "-m", "yt_dlp", "--remote-components", "ejs:github", "--dump-single-json", "--no-download", url]
     ]
     last_err = ""
     for cmd in commands:
@@ -161,6 +161,7 @@ def download_source_video(url, output_path):
     commands = [
         [
             sys.executable, "-m", "yt_dlp",
+            "--remote-components", "ejs:github",
             "--extractor-args", "youtube:player_client=visionos,android",
             "-f", "315+251/315+140/337+251/bestvideo[height>=2160][vcodec^=vp9]+bestaudio/701+251/bestvideo[height>=2160]+bestaudio/bestvideo+bestaudio/best",
             "--format-sort", "res:2160,fps:60,res,fps",
@@ -172,6 +173,7 @@ def download_source_video(url, output_path):
         ],
         [
             sys.executable, "-m", "yt_dlp",
+            "--remote-components", "ejs:github",
             "--extractor-args", "youtube:player_client=visionos,android",
             "-f", "bestvideo+bestaudio/best",
             "--format-sort", "res:2160,fps:60,res,fps",
@@ -183,6 +185,7 @@ def download_source_video(url, output_path):
         ],
         [
             sys.executable, "-m", "yt_dlp",
+            "--remote-components", "ejs:github",
             "--extractor-args", "youtube:player_client=web,android",
             "-f", "bestvideo[height>=1080]+bestaudio/bestvideo+bestaudio/best",
             "--format-sort", "res:2160,fps:60,res,fps",
@@ -194,6 +197,7 @@ def download_source_video(url, output_path):
         ],
         [
             sys.executable, "-m", "yt_dlp",
+            "--remote-components", "ejs:github",
             "-f", "bestvideo+bestaudio/best",
             "--format-sort", "res:2160,fps:60,res,fps",
             "--merge-output-format", "mp4",

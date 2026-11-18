@@ -1047,7 +1047,7 @@ def fetch_metadata(url: str) -> Optional[Tuple[dict, str]]:
     cookie_args = get_yt_dlp_cookie_args()
     while True:
         PipelineLogger.info(f"{C_YELLOW}> Analyzing media source and extracting metadata...{C_RESET}")
-        cmd = ["yt-dlp", "--write-comments", "--dump-single-json", "--no-download"] + cookie_args + [current_url]
+        cmd = ["yt-dlp", "--remote-components", "ejs:github", "--write-comments", "--dump-single-json", "--no-download"] + cookie_args + [current_url]
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0:
             try:
@@ -1326,6 +1326,7 @@ def handle_short_pipeline(meta: dict, url: str, classification_reason: str = "")
             cookie_args = get_yt_dlp_cookie_args()
             dl_cmd = [
                 "yt-dlp",
+                "--remote-components", "ejs:github",
                 "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                 "--merge-output-format", "mp4"
             ] + cookie_args + [
@@ -1615,6 +1616,7 @@ def handle_long_pipeline(meta: dict, url: str):
     cookie_args = get_yt_dlp_cookie_args()
     dl_cmd = [
         "yt-dlp",
+        "--remote-components", "ejs:github",
         "--extractor-args", "youtube:player_client=visionos,android",
         "-f", "bestvideo+bestaudio/best",
         "--merge-output-format", "mp4"
